@@ -1,0 +1,7 @@
+# build inputs/outputs that can be regenerated
+__pycache__/
+*.py[cod]
+.venv/
+/tmp/
+
+# the page renders are rebuilt by prepare.py; the previews are small enough to keep
