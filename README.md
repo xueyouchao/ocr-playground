@@ -7,9 +7,13 @@ Open `index.html` and you get the scanned page on the left and every parser's ou
 a **text** / **preview** toggle per pane: `text` is exactly what the parser emitted, `preview` renders it
 (HTML in a sandboxed iframe, markdown through a small converter).
 
-The document is
+You can also **read your own document**: a PDF of up to five pages, or a single image (PNG, JPEG,
+TIFF, WebP). It is parsed live on the server by LiteParse + Tesseract — the one system here that fits in
+a couple of seconds per page — and shown in the same layout. Nothing is stored.
+
+The bundled document is
 [`corpus/document.pdf`](corpus/document.pdf) — six pages from a demo corpus: one printed page and five
-handwritten flight/field forms.
+handwritten flight/field forms, read ahead of time by all eight systems.
 
 ## Why it exists
 
@@ -43,6 +47,15 @@ make serve          # http://127.0.0.1:8080
 ```
 
 `make pages` needs poppler (`pdftoppm`). `make site` needs nothing but Python 3.11+.
+
+The upload service is a separate process; run it beside the page:
+
+```bash
+python api/server.py --port 8090        # health: /api/health, upload: POST /api/parse
+```
+
+In production it runs as its own container behind the same Traefik router (`deploy/README.md`), which
+is why the page calls `/api/parse` on its own origin.
 
 Re-running a parser writes its record; then `make site` picks it up:
 
@@ -111,6 +124,7 @@ runners/                 one file per CPU parser; _common.py defines the record 
 modal/                   one app per GPU parser, all scale-to-zero
 records/<id>.json        {"page-1": "text…", …} — raw output, never hand-edited
 systems.json             the roster the page renders (name, pipeline, device, how to run)
+api/server.py            the upload service: render, parse, measure, return
 collect.py               records + roster -> evidence.json
 build.py                 template.html + evidence.json -> index.html
 template.html            the page: source rail, eight panes, text/preview per pane

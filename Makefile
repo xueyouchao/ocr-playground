@@ -3,7 +3,7 @@ PY        ?= python3
 PORT      ?= 8080
 SITE_DIR  ?= /home/ubuntu/sites/ocr-playground
 
-.PHONY: help pages records site serve publish clean
+.PHONY: help pages records site serve publish api clean
 
 help:
 	@echo "make pages    render corpus/document.pdf -> /tmp/ocr-playground/pages + assets/pages"
@@ -11,6 +11,7 @@ help:
 	@echo "make site     records/ -> evidence.json -> index.html"
 	@echo "make serve    serve the site on :$(PORT)"
 	@echo "make publish  copy index.html + assets/ to $(SITE_DIR) (see deploy/)"
+	@echo "make api      run the upload service on :8090"
 	@echo "make clean    drop evidence.json and index.html"
 
 pages:
@@ -22,6 +23,9 @@ site:
 
 serve:
 	$(PY) -m http.server $(PORT) --bind 0.0.0.0
+
+api:
+	$(PY) api/server.py --port 8090
 
 publish: site
 	# two explicit syncs: `rsync -a --delete index.html assets/ dest/` would flatten assets/

@@ -27,6 +27,24 @@ docker run -d --name ocr-playground --restart unless-stopped \
 
 Because the directory is bind-mounted, `make publish` is the whole deploy — no restart, no reload.
 
+The upload API is its own container, sharing the hostname under `/api` (Traefik picks the longer rule):
+
+```bash
+docker build -t ocr-playground-api:latest -f api/Dockerfile api
+docker run -d --name ocr-playground-api --restart unless-stopped \
+  --label traefik.enable=true \
+  --label 'traefik.http.routers.ocr-playground-api.rule=Host(`ocr-playground.srv1567269.hstgr.cloud`) && PathPrefix(`/api`)' \
+  --label traefik.http.routers.ocr-playground-api.entrypoints=websecure \
+  --label traefik.http.routers.ocr-playground-api.tls=true \
+  --label traefik.http.routers.ocr-playground-api.tls.certresolver=letsencrypt \
+  --label traefik.http.services.ocr-playground-api.loadbalancer.server.port=8090 \
+  ocr-playground-api:latest
+```
+
+It is unauthenticated and public. The only defences are the caps in `api/server.py` (20 MB, 5 pages,
+120 s, two parses at a time) and the fact that nothing it receives is written to disk outside a
+temporary directory. Add rate limiting before pointing it at anything that matters.
+
 ## Anywhere else
 
 ```bash

@@ -30,6 +30,21 @@
   .chip b { display: block; font-size: 13px; margin-bottom: 4px; }
   .chip small { display: block; font: 11px/1.5 var(--mono); color: var(--soft); }
 
+  .uploader { border: 1px solid var(--line); border-radius: 12px; background: var(--paper); padding: 14px 16px;
+              display: grid; grid-template-columns: 1fr auto; gap: 10px 18px; align-items: center; margin: 18px 0 4px; }
+  .uploader b { display: block; font-size: 14px; margin-bottom: 3px; }
+  .uploader span { font-size: 12.5px; color: var(--soft); line-height: 1.45; display: block; max-width: 78ch; }
+  .uploader .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .uploader input[type=file] { font: 12px var(--mono); max-width: 260px; }
+  .uploader button { font: 600 11px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase;
+                     padding: 8px 11px; border-radius: 6px; border: 1px solid var(--accent);
+                     background: var(--accent); color: #fff; cursor: pointer; }
+  .uploader button.ghost { background: #fff; color: var(--accent); border-color: var(--line); }
+  .uploader button:disabled { opacity: .5; cursor: default; }
+  .upload-status { grid-column: 1 / -1; margin: 0; font: 12px var(--mono); color: var(--soft); min-height: 1em; }
+  .upload-status.error { color: var(--bad); }
+  @media (max-width: 720px) { .uploader { grid-template-columns: 1fr; } }
+
   .layout { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: 22px; align-items: start; }
   .layout > * { min-width: 0; }
   @media (max-width: 1080px) { .layout { grid-template-columns: 1fr; } .rail { position: static !important; } }
@@ -96,6 +111,21 @@
   the page on the left. A pane that says <b>not run</b> had no endpoint; it is not a failure.
 </p>
 
+<section class="uploader" id="uploader">
+  <div>
+    <b>Read your own document</b>
+    <span>A PDF (up to 5 pages) or a single image, parsed live on this server by LiteParse + Tesseract.
+      The sample below was parsed ahead of time by eight systems; an upload runs the one that fits in a
+      couple of seconds per page.</span>
+  </div>
+  <div class="actions">
+    <input id="file" type="file" accept="application/pdf,image/png,image/jpeg,image/tiff,image/webp" aria-label="choose a PDF or image">
+    <button id="read-file">read it</button>
+    <button id="back-to-sample" class="ghost" hidden>back to the sample</button>
+  </div>
+  <p class="upload-status" id="upload-status"></p>
+</section>
+
 <h2>The document · <span id="doc-name"></span> · <span id="doc-note"></span></h2>
 <div class="strip" id="strip" role="group" aria-label="pages"></div>
 
@@ -132,7 +162,10 @@
 
 <script>
 const DATA = __EVIDENCE__;
-const state = { page: 1, view: {}, allPreview: false };
+const state = { page: 1, view: {}, allPreview: false, uploaded: null };
+// The renderers do not care whether the document is the bundled sample or a fresh upload: both
+// arrive in the same shape, so this is the only branch in the page.
+const currentDoc = () => state.uploaded || DATA;
 const $ = (id) => document.getElementById(id);
 
 function escapeHtml(markup) {
@@ -263,31 +296,35 @@ function previewDocument(text) {
 }
 
 function pageOf(number) {
-  return DATA.pages.find((page) => page.page === number);
+  return currentDoc().pages.find((page) => page.page === number);
 }
 
 function renderRail() {
-  const source = `assets/pages/page-${state.page}.jpg`;
+  const doc = currentDoc();
+  const page = pageOf(state.page);
+  const source = page.preview || `assets/pages/page-${state.page}.jpg`;
   $("rail-image").src = source;
-  $("rail-image").alt = `page ${state.page} as scanned`;
+  $("rail-image").alt = `page ${state.page} as it was read`;
   $("rail-open").href = source;
-  $("rail-caption").textContent =
-    `page ${state.page} of ${DATA.pages.length} · 110 dpi preview · the parsers read a 200 dpi render`;
+  $("rail-caption").textContent = state.uploaded
+    ? `page ${state.page} of ${doc.pages.length} · your upload · parsed at 200 dpi`
+    : `page ${state.page} of ${doc.pages.length} · 110 dpi preview · the parsers read a 200 dpi render`;
 }
 
 function renderStrip() {
-  $("doc-name").textContent = DATA.document.name;
-  $("doc-note").textContent = DATA.document.note;
-  $("strip").innerHTML = DATA.pages.map((page) => {
-    const ran = DATA.systems.filter((system) => page.cells[system.id].chars != null).length;
+  const doc = currentDoc();
+  $("doc-name").textContent = doc.document.name;
+  $("doc-note").textContent = doc.document.note;
+  $("strip").innerHTML = doc.pages.map((page) => {
+    const ran = doc.systems.filter((system) => page.cells[system.id].chars != null).length;
     return `<button class="chip" data-page="${page.page}" aria-pressed="${page.page === state.page}">
-      <b>page ${page.page}</b><small>${ran}/${DATA.systems.length} parsers produced text</small></button>`;
+      <b>page ${page.page}</b><small>${ran}/${doc.systems.length} parsers produced text</small></button>`;
   }).join("");
 }
 
 function renderPanes() {
   const page = pageOf(state.page);
-  $("panes").innerHTML = DATA.systems.map((system) => {
+  $("panes").innerHTML = currentDoc().systems.map((system) => {
     const cell = page.cells[system.id];
     const ran = cell.chars != null;
     // Counts, not a score: there is no ground truth for these pages, and every proxy tried here
@@ -327,9 +364,12 @@ function renderPanes() {
 }
 
 function renderFooter() {
-  $("footer").textContent =
-    `${DATA.systems.length} parsers on ${DATA.pages.length} pages · recorded from each project's own CLI/API on a 4-core CPU box `
-    + `(200 dpi page renders) and Modal L4 GPUs · runs are in records/, provenance in systems.json.`;
+  const doc = currentDoc();
+  $("footer").textContent = state.uploaded
+    ? `Your upload, ${doc.pages.length} page${doc.pages.length === 1 ? "" : "s"} · read live by ${doc.systems.length} `
+      + `parser${doc.systems.length === 1 ? "" : "s"} on this server · nothing is stored.`
+    : `${doc.systems.length} parsers on ${doc.pages.length} pages · recorded from each project's own CLI/API on a 4-core CPU box `
+      + `(200 dpi page renders) and Modal L4 GPUs · runs are in records/, provenance in systems.json.`;
   $("preview-all").setAttribute("aria-pressed", String(state.allPreview));
 }
 
@@ -353,6 +393,85 @@ $("preview-all").addEventListener("click", () => {
   state.view = {};
   render();
 });
+
+// ---------- read your own document ----------
+// The upload runs on the same origin, behind the same Traefik router (`/api`). The static mirror on
+// GitHub Pages has no server behind it, so the panel explains itself there instead of failing.
+
+const UPLOAD_API = "/api/parse";
+
+function uploadStatus(message, isError) {
+  const line = $("upload-status");
+  line.textContent = message;
+  line.classList.toggle("error", Boolean(isError));
+}
+
+function setUploadBusy(busy) {
+  $("read-file").disabled = busy;
+  $("file").disabled = busy;
+}
+
+async function readUpload(file) {
+  setUploadBusy(true);
+  const started = Date.now();
+  const ticker = setInterval(() => {
+    uploadStatus(`reading ${file.name}… ${Math.round((Date.now() - started) / 1000)}s · up to five pages, a few seconds each`);
+  }, 1000);
+  uploadStatus(`reading ${file.name}…`);
+  try {
+    const response = await fetch(UPLOAD_API, {
+      method: "POST",
+      headers: {
+        "Content-Type": file.type || "application/octet-stream",
+        "X-Filename": file.name,
+      },
+      body: file,
+    });
+    const body = await response.json().catch(() => ({ error: response.statusText }));
+    if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+
+    state.uploaded = body;
+    state.page = 1;
+    state.view = {};
+    state.allPreview = false;
+    $("back-to-sample").hidden = false;
+    const seconds = ((Date.now() - started) / 1000).toFixed(1);
+    uploadStatus(`${file.name} · ${body.document.pages} page${body.document.pages === 1 ? "" : "s"} read in ${seconds}s`);
+    render();
+  } catch (error) {
+    uploadStatus(`could not read that file — ${error.message}`, true);
+  } finally {
+    clearInterval(ticker);
+    setUploadBusy(false);
+  }
+}
+
+$("read-file").addEventListener("click", () => {
+  const file = $("file").files[0];
+  if (!file) return uploadStatus("choose a PDF or an image first", true);
+  return readUpload(file);
+});
+
+$("file").addEventListener("change", () => {
+  const file = $("file").files[0];
+  if (file) readUpload(file);
+});
+
+$("back-to-sample").addEventListener("click", () => {
+  state.uploaded = null;
+  state.page = 1;
+  state.view = {};
+  state.allPreview = false;
+  $("back-to-sample").hidden = true;
+  $("file").value = "";
+  uploadStatus("");
+  render();
+});
+
+if (location.hostname.endsWith("github.io")) {
+  setUploadBusy(true);
+  uploadStatus("this mirror is static — uploads run on https://ocr-playground.srv1567269.hstgr.cloud");
+}
 
 function render() {
   renderRail();
