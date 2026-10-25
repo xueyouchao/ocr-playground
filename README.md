@@ -1,6 +1,124 @@
 # ocr-playground
 
-Eight document parsers, one scanned form, side by side.
+Eight document parsers, one scanned form, side by side — a throwaway comparison turned into something
+you can run again.
 
-The sources, the records and the page generator land through a pull request rather than straight on
-`main`. Until that merges, this branch holds only this note.
+Open `index.html` and you get the scanned page on the left and every parser's output on the right, with
+a **text** / **preview** toggle per pane: `text` is exactly what the parser emitted, `preview` renders it
+(HTML in a sandboxed iframe, markdown through a small converter).
+
+The document is
+[`corpus/document.pdf`](corpus/document.pdf) — six pages from a demo corpus: one printed page and five
+handwritten flight/field forms.
+
+## Why it exists
+
+The original question was "why does our ingestion pipeline publish garbage for this PDF?" The answer is
+in `corpus/document.pdf` itself: its `creator` is `ocrmypdf 13.4.3 / Tesseract OCR-PDF v5.2.0`, so the
+"text layer" is a 2023 Tesseract pass over the scan. Anything that trusts a text layer inherits that
+pass. Hence this shootout: what do the parsers that actually look at the pixels produce?
+
+## The eight systems
+
+| system | pipeline | runs where |
+|---|---|---|
+| LiteParse + Tesseract | raster + bundled Tesseract | CPU |
+| PaddleOCR PP-StructureV3 | layout → OCR → tables → order, mobile models | CPU |
+| PP-StructureV3 (GPU) | server models, tables, chart branch | Modal L4 |
+| MinerU 2.5 (VLM) | VLM backend, page by page | Modal L4 |
+| GLM-OCR | 0.9B VLM | Modal L4 (vLLM) |
+| Chandra OCR 2 | datalab VLM | Modal L4 |
+| Unlimited-OCR | tiled VLM | Modal L4 |
+| Nemotron 3.5 Parse | NVIDIA VLM + the repo's own postprocessing | Modal L4 |
+
+Each was run the way its project intends: native CLI or API, default prompts from the model cards, and
+`records/<id>.json` holds the raw output verbatim.
+
+## Run it
+
+```bash
+make pages          # corpus/document.pdf -> /tmp/ocr-playground/pages (200 dpi) + assets/pages (110 dpi)
+make site           # records/ -> evidence.json -> index.html
+make serve          # http://127.0.0.1:8080
+```
+
+`make pages` needs poppler (`pdftoppm`). `make site` needs nothing but Python 3.11+.
+
+Re-running a parser writes its record; then `make site` picks it up:
+
+```bash
+# CPU parsers
+LIT_CLI=/path/to/lit python runners/liteparse_system.py
+/home/ubuntu/tmp/paddle-venv/bin/python runners/paddle_structure.py
+
+# GPU parsers (Modal; each app scales to zero)
+modal deploy modal/serve_glm_ocr.py        # then point the runner at its URL
+python runners/vlm_endpoint.py --id glm-ocr --model glm-ocr \
+    --base-url https://…/v1 --prompt "Text Recognition:"
+
+modal run modal/paddle_structure_gpu.py --paths /tmp/ocr-playground/pages/page-1.png,…
+modal run modal/mineru_gpu.py              # page by page, retries, pipeline fallback
+```
+
+`runners/vlm_endpoint.py` speaks any OpenAI-compatible endpoint, so a hosted API works as well as a
+Modal deployment. Cold Modal endpoints answer with a `303`; the runner follows it and waits.
+
+## Deploy it
+
+It is a static site: `index.html`, `assets/pages/*.jpg`, nothing else is needed at runtime.
+
+```bash
+rsync -av --delete index.html assets/ user@host:/var/www/ocr-playground/
+```
+
+`deploy/nginx.conf` is a minimal server block with cache headers for the page images. Any static host
+works — the page has no build step, no frameworks, no external requests.
+
+## What the numbers are, and are not
+
+The page shows **counts only**: characters, tokens written, and the share that are numbers. There is
+deliberately no accuracy score.
+
+An earlier version scored every pane with a dictionary share (how many of its alphabetic tokens a
+73k-entry word list knows). It was removed because it measured the wrong thing here: page 4 is 77%
+numbers and its 50 remaining words are column abbreviations — `CLD` (×14), `ABV`, `BTN`, `BLW`, `TDME`,
+`TRK`, `WD`, `WS`, `SP`, `NOAA` — so a correct reading scored 30%. Across the six pages the denominator
+ranged from 2 to 187 words, which made the score meaningful on page 1 and noise everywhere else.
+
+A real accuracy number needs ground truth: one page hand-transcribed and diffed per parser. That has
+not been done. Until it is, the comparison is visual, and the character counts are not a ranking —
+Chandra's 21,033 characters on page 5 are a table truncated at `max_tokens`, and MinerU's 13,630 are a
+verbose pipeline fallback.
+
+## What this prototype taught us
+
+- **A text layer is not evidence of a reading.** This file's layer is a prior OCR pass; the pipeline that
+  trusted it published wrong text for five of six pages.
+- **Routing needs a content-quality signal, not a damage signal.** The acceptance rule measured Unicode
+  damage, and ordinary letters from a bad OCR pass score 0.0 damage.
+- **Page-level, not document-level.** MinerU's VLM backend silently dropped page 3 from a whole-document
+  run and read it fine alone; PP-StructureV3's server layout model classes that page as a chart and
+  emits an empty grid unless the chart branch is on. Both needed per-page attention to produce anything.
+- **Structure without content looks like success.** The empty-cell table is the most dangerous output
+  here, because a screenshot of it looks parsed.
+
+## Layout
+
+```
+corpus/document.pdf      the six-page scan (source of truth)
+prepare.py               poppler -> /tmp/ocr-playground/pages (200 dpi) + assets/pages (110 dpi)
+runners/                 one file per CPU parser; _common.py defines the record shape
+modal/                   one app per GPU parser, all scale-to-zero
+records/<id>.json        {"page-1": "text…", …} — raw output, never hand-edited
+systems.json             the roster the page renders (name, pipeline, device, how to run)
+collect.py               records + roster -> evidence.json
+build.py                 template.html + evidence.json -> index.html
+template.html            the page: source rail, eight panes, text/preview per pane
+```
+
+## Credits
+
+Parsers belong to their projects: [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR),
+[MinerU](https://github.com/opendatalab/MinerU), [Chandra](https://github.com/datalab-to/chandra),
+[Unlimited-OCR](https://github.com/baidu/Unlimited-OCR), NVIDIA Nemotron-3.5-Parse,
+[LiteParse](https://github.com/datalab-to/liteparse). Their licences apply to their output.
