@@ -24,7 +24,10 @@ serve:
 	$(PY) -m http.server $(PORT) --bind 0.0.0.0
 
 publish: site
-	rsync -a --delete index.html assets/ $(SITE_DIR)/
+	# two explicit syncs: `rsync -a --delete index.html assets/ dest/` would flatten assets/
+	# into the site root and then delete the real directory
+	rsync -a index.html $(SITE_DIR)/
+	rsync -a --delete assets/ $(SITE_DIR)/assets/
 
 clean:
 	rm -f evidence.json index.html
