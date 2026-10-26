@@ -6,23 +6,51 @@
 <title>OCR shootout — one scanned form, every parser</title>
 <style>
   :root {
+    color-scheme: light;
     --ink: #1b1d22; --soft: #5b6270; --line: #dfe2e8; --paper: #fbfbfc;
-    --accent: #3b3f8f; --accent-soft: #eceefa;
+    --surface: #fff;
+    --accent: #3b3f8f; --accent-soft: #eceefa; --on-accent: #fff;
     --bad: #9c2b2b; --bad-soft: #fbeeee; --good: #1f6b45; --good-soft: #eaf5ef;
     --mid: #7a5b00; --mid-soft: #fdf6e3;
+    --plain-soft: #f2f3f6; --placeholder: #9aa1ad;
+    --mark: #fde68a; --mark-ink: #1b1d22; --mark-current: #f5b301; --mark-edge: #b57f00;
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
+  /* Night is the same page with the palette swapped, not a second layout: every surface the day
+     theme painted white is a variable, because one hard-coded #fff is a lit window at midnight.
+     The attribute is set in <head>, before the first paint, so night never flashes white. */
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --ink: #e6e8ee; --soft: #9aa3b2; --line: #2b303a; --paper: #161a21;
+    --surface: #101319;
+    --accent: #aab4ff; --accent-soft: #232842; --on-accent: #10131a;
+    --bad: #ff9f9f; --bad-soft: #3a2224; --good: #7fd7a6; --good-soft: #1d3329;
+    --mid: #e8c579; --mid-soft: #322b18;
+    --plain-soft: #262b34; --placeholder: #6f7887;
+    --mark: #8a6a10; --mark-ink: #fff6d8; --mark-current: #b98600; --mark-edge: #e8c579;
+  }
   * { box-sizing: border-box; }
-  body { margin: 0 auto; padding: 40px 24px 90px; max-width: 1680px; background: #fff; color: var(--ink);
+  body { margin: 0 auto; padding: 40px 24px 90px; max-width: 1680px; background: var(--surface); color: var(--ink);
          font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   h1 { font-size: 26px; line-height: 1.25; margin: 0 0 10px; letter-spacing: -0.01em; }
+
+  /* The toggle sits on the title line, where it is found before the page is scrolled, and stays a
+     normal button: it is a preference, not a mode the page decides for the visitor. */
+  .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .theme-toggle { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;
+                  font: 600 11px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase;
+                  padding: 7px 10px; border-radius: 6px; border: 1px solid var(--line);
+                  background: var(--surface); color: var(--accent); cursor: pointer; }
+  .theme-toggle:hover { border-color: var(--accent); }
+  .theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .theme-toggle[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
   .lede { color: var(--soft); max-width: 90ch; margin: 0 0 6px; }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--soft);
        margin: 34px 0 12px; font-weight: 650; }
   button { font: inherit; color: inherit; }
 
   .strip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
-  .chip { border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 10px 8px;
+  .chip { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px 8px;
           cursor: pointer; text-align: left; }
   .chip[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
   .chip b { display: block; font-size: 13px; margin-bottom: 4px; }
@@ -36,8 +64,8 @@
   .uploader input[type=file] { font: 12px var(--mono); max-width: 260px; }
   .uploader button { font: 600 11px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase;
                      padding: 8px 11px; border-radius: 6px; border: 1px solid var(--accent);
-                     background: var(--accent); color: #fff; cursor: pointer; }
-  .uploader button.ghost { background: #fff; color: var(--accent); border-color: var(--line); }
+                     background: var(--accent); color: var(--on-accent); cursor: pointer; }
+  .uploader button.ghost { background: var(--surface); color: var(--accent); border-color: var(--line); }
   .uploader button:disabled { opacity: .5; cursor: default; }
   .modes { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
   .modes-label { font: 600 10.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase;
@@ -45,7 +73,7 @@
   .checks { display: flex; gap: 6px; flex-wrap: wrap; }
   .checks label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
                   font: 600 11.5px/1.3 var(--mono); padding: 6px 10px; border-radius: 7px;
-                  border: 1px solid var(--line); background: #fff; color: var(--soft); }
+                  border: 1px solid var(--line); background: var(--surface); color: var(--soft); }
   .checks label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft);
                                      color: var(--accent); }
   .checks label:has(input:disabled) { opacity: .5; cursor: default; }
@@ -66,7 +94,7 @@
   .rail header b { font-size: 13px; }
   .rail header a { font: 11px/1 var(--mono); color: var(--accent); text-decoration: none; }
   .rail header a:hover { text-decoration: underline; }
-  .rail figure { margin: 0; padding: 10px; background: #fff; }
+  .rail figure { margin: 0; padding: 10px; background: var(--surface); }
   .rail img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; }
   .rail figcaption { font: 11px/1.5 var(--mono); color: var(--soft); padding: 0 4px 4px; }
 
@@ -74,11 +102,11 @@
   .badge.bad { background: var(--bad-soft); color: var(--bad); }
   .badge.good { background: var(--good-soft); color: var(--good); }
   .badge.mid { background: var(--mid-soft); color: var(--mid); }
-  .badge.plain { background: #f2f3f6; color: var(--soft); }
+  .badge.plain { background: var(--plain-soft); color: var(--soft); }
 
   .panes { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(330px, 100%), 1fr));
            gap: 12px; min-width: 0; }
-  .pane { border: 1px solid var(--line); border-radius: 12px; background: #fff; display: flex;
+  .pane { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); display: flex;
           flex-direction: column; min-width: 0; overflow: hidden; }
   .pane header { padding: 12px 14px 10px; border-bottom: 1px solid var(--line); background: var(--paper); }
   .pane header .title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
@@ -91,7 +119,7 @@
   .pane-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
   .tabs { display: flex; gap: 4px; flex: 0 0 auto; }
   .tabs button { font: 600 11px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase;
-                 padding: 6px 9px; border-radius: 6px; border: 1px solid var(--line); background: #fff;
+                 padding: 6px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface);
                  color: var(--soft); cursor: pointer; }
   .tabs button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
   .tabs button:disabled { opacity: .45; cursor: default; }
@@ -100,36 +128,55 @@
      the preview is the same output rendered, so its matches are marked too. */
   .find { display: flex; align-items: center; gap: 4px; flex: 1 1 210px; min-width: 0; }
   .find input { flex: 1 1 90px; min-width: 0; font: 11px var(--mono); padding: 5px 7px;
-                border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
-  .find input::placeholder { color: #9aa1ad; }
+                border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+  .find input::placeholder { color: var(--placeholder); }
   .find .hits { font: 10.5px/1 var(--mono); color: var(--soft); min-width: 5.2em;
                 text-align: right; white-space: nowrap; }
   .find .hits.none { color: var(--bad); }
   .find .step { font: 600 12px/1 var(--mono); padding: 5px 7px; border-radius: 6px; border: 1px solid var(--line);
-                background: #fff; color: var(--accent); cursor: pointer; }
+                background: var(--surface); color: var(--accent); cursor: pointer; }
   .find .step:disabled { opacity: .4; color: var(--soft); cursor: default; }
 
   .pane .body { font: 12px/1.5 var(--mono); white-space: pre-wrap; overflow: auto; padding: 12px 14px;
                 height: 320px; overflow-wrap: anywhere; word-break: break-word; }
   .pane .none { color: var(--soft); font-style: italic; white-space: normal; }
-  .pane iframe { display: block; width: 100%; height: 320px; border: 0; background: #fff; }
-  .pane .body mark { background: #fde68a; color: inherit; border-radius: 2px; padding: 0; }
-  .pane .body mark.current { background: #f5b301; outline: 1px solid #b57f00; }
+  .pane iframe { display: block; width: 100%; height: 320px; border: 0; background: var(--surface); }
+  .pane .body mark { background: var(--mark); color: var(--mark-ink); border-radius: 2px; padding: 0; }
+  .pane .body mark.current { background: var(--mark-current); outline: 1px solid var(--mark-edge); }
   .pane .body table { border-collapse: collapse; width: 100%; font: 10.5px/1.3 var(--mono); }
   .pane .body table td { border: 1px solid var(--line); padding: 2px 4px; vertical-align: top; }
 
   .toolbar { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
   .toolbar button { font: 600 11px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase;
                     padding: 7px 10px; border-radius: 6px; border: 1px solid var(--line);
-                    background: #fff; color: var(--accent); cursor: pointer; }
+                    background: var(--surface); color: var(--accent); cursor: pointer; }
   .toolbar button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
   footer { margin-top: 46px; font-size: 13px; color: var(--soft); border-top: 1px solid var(--line); padding-top: 16px; }
   code { font-family: var(--mono); font-size: 12px; background: var(--paper); padding: 1px 4px; border-radius: 4px; }
 </style>
+<script>
+  // Before the first paint: a page that flips to night after a flash of white has already failed at
+  // night. Same key and same fallback as the toggle below, or the two could disagree on load.
+  try {
+    const saved = localStorage.getItem("ocr-theme");
+    document.documentElement.dataset.theme = saved === "dark" || saved === "light" ? saved
+      : (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  } catch {
+    // Storage can be refused (private windows); the OS preference still decides.
+    document.documentElement.dataset.theme =
+      matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+</script>
 </head>
 <body>
 
-<h1>OCR-playground (CPU/GPU)</h1>
+<div class="topbar">
+  <h1>OCR-playground (CPU/GPU)</h1>
+  <button id="theme" class="theme-toggle" type="button" aria-pressed="false"
+          title="switch between the day and night themes">
+    <span aria-hidden="true">☾</span> night theme
+  </button>
+</div>
 <p class="lede">
   Every pane is a parser run the way its own project intends. The baseline is an <b>open-source,
   text-based CPU pipeline</b> (LiteParse + Tesseract): no GPU, a couple of seconds per page, and a
@@ -207,6 +254,46 @@ const state = { page: 1, view: {}, allPreview: true, uploaded: null, modes: ["gl
 // arrive in the same shape, so this is the only branch in the page.
 const currentDoc = () => state.uploaded || DATA;
 const $ = (id) => document.getElementById(id);
+
+// ---------- day / night ----------
+// A visitor who has not chosen follows the OS, which is what makes the page go dark at sunset on its
+// own; a click overrides that and is remembered. The boot script in <head> reads the same key, so the
+// first paint already has the right palette.
+const THEME_KEY = "ocr-theme";
+const prefersDark = () => window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches;
+
+function storedTheme() {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    return saved === "dark" || saved === "light" ? saved : null;
+  } catch {
+    return null; // storage refused: the page still switches, it just will not remember
+  }
+}
+
+function currentTheme() {
+  return storedTheme() || (prefersDark() ? "dark" : "light");
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  // A pressed toggle says "night is on", which is the state, not the action: clicking it again is
+  // how day comes back.
+  $("theme").setAttribute("aria-pressed", String(theme === "dark"));
+}
+
+// The previews are separate documents: the page's variables stop at the iframe boundary, so switching
+// the theme has to rebuild them or six panes of white paper sit in the middle of a dark page.
+$("theme").addEventListener("click", () => {
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  try {
+    localStorage.setItem(THEME_KEY, next);
+  } catch {
+    // nothing to remember it with
+  }
+  applyTheme(next);
+  render();
+});
 
 function escapeHtml(markup) {
   return String(markup).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -324,6 +411,21 @@ const PREVIEW_STYLE = `
               color: #5b6270; font: 10px/1.6 ui-monospace, monospace; background: #f7f8fa; }
 `;
 
+// A preview is its own document, so night is carried in as a second sheet rather than inherited. The
+// values are the page's night palette; the day sheet above stays the base.
+const PREVIEW_DARK_STYLE = `
+  body { color: #e6e8ee; background: #101319; }
+  td,th { border-color: #2b303a; }
+  th { background: #1a1f27; }
+  pre { background: #1a1f27; }
+  blockquote { border-color: #2b303a; color: #9aa3b2; }
+  .img-gone { border-color: #3a4150; color: #9aa3b2; background: #1a1f27; }
+`;
+
+function previewStyle() {
+  return currentTheme() === "dark" ? PREVIEW_STYLE + PREVIEW_DARK_STYLE : PREVIEW_STYLE;
+}
+
 // Parsers that extract figures write paths into their own output directory (imgs/…); those files are
 // not shipped, so a broken-image icon is the wrong signal. Say what it is instead.
 function withImagePlaceholders(html) {
@@ -364,7 +466,7 @@ function previewDocument(text) {
   const body = isHtmlDocument(text)
     ? withImagePlaceholders(text)
     : isHtml(text) ? mixedToHtml(text) : markdownToHtml(text);
-  return `<!doctype html><html><head><meta charset="utf-8"><style>${PREVIEW_STYLE}</style></head>`
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${previewStyle()}</style></head>`
     + `<body>${body}</body></html>`;
 }
 
@@ -375,8 +477,23 @@ function previewDocument(text) {
 // "total alcohol" should still be found across one. Matches are marked, never filtered: the reading
 // around the hit is what you are there to compare.
 const FIND_ESCAPE = /[.*+?^${}()|[\]\\]/g;
-const FIND_STYLE = "background:#fde68a;color:inherit;border-radius:2px";
-const FIND_CURRENT_STYLE = "background:#f5b301;color:inherit;border-radius:2px;outline:1px solid #b57f00";
+// A preview carries the parser's own stylesheet, so its marks are inline styles. They name their own
+// text colour: an inherited one is light on a light mark at night, which is unreadable.
+const FIND_MARKS = {
+  light: {
+    hit: "background:#fde68a;color:#1b1d22;border-radius:2px",
+    current: "background:#f5b301;color:#1b1d22;border-radius:2px;outline:1px solid #b57f00",
+  },
+  dark: {
+    hit: "background:#8a6a10;color:#fff6d8;border-radius:2px",
+    current: "background:#b98600;color:#fff6d8;border-radius:2px;outline:1px solid #e8c579",
+  },
+};
+
+function findMark(kind) {
+  const marks = FIND_MARKS[currentTheme()] || FIND_MARKS.light;
+  return kind === "current" ? marks.current : marks.hit;
+}
 
 function findRegex(query) {
   const text = String(query).trim();
@@ -495,7 +612,7 @@ function highlightDocument(doc, query) {
       const mark = doc.createElement("mark");
       mark.textContent = text.slice(range.start, range.end);
       mark.dataset.hit = String(range.hit);
-      mark.setAttribute("style", FIND_STYLE);
+      mark.setAttribute("style", findMark("hit"));
       fragment.append(mark);
       cursor = range.end;
     }
@@ -613,11 +730,11 @@ function applyCurrentMatch(systemId) {
   marks.forEach((mark) => {
     mark.classList.remove("current");
     // A preview carries the parser's own stylesheet, so its marks are styled inline.
-    if (inFrame) mark.setAttribute("style", FIND_STYLE);
+    if (inFrame) mark.setAttribute("style", findMark("hit"));
   });
   for (const mark of groups[index]) {
     mark.classList.add("current");
-    if (inFrame) mark.setAttribute("style", FIND_CURRENT_STYLE);
+    if (inFrame) mark.setAttribute("style", findMark("current"));
   }
   const mark = groups[index][0];
   if (inFrame) {
@@ -1127,6 +1244,17 @@ function render() {
   renderFooter();
 }
 
+// Follow the OS while the visitor has not chosen: a machine that turns dark at sunset takes the page
+// with it. Once there is a stored choice, the OS is no longer the authority.
+if (window.matchMedia) {
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (storedTheme()) return;
+    applyTheme(prefersDark() ? "dark" : "light");
+    render();
+  });
+}
+
+applyTheme(currentTheme());
 render();
 loadModes();
 </script>
