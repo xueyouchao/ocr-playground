@@ -45,6 +45,13 @@ class Settings:
     default_mode: str = "glm"
     lit_path: str = ""
 
+    # Pre-warming the GPU before an upload. Each warm is minutes of billed GPU time (boot plus
+    # scaledown_window), so it is throttled and capped rather than offered on every page view.
+    warm_enabled: bool = True
+    warm_min_interval_seconds: int = 300
+    warm_daily_cap: int = 40
+    warm_timeout_seconds: int = 120
+
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
         values = os.environ if env is None else env
@@ -57,6 +64,11 @@ class Settings:
             glm_request_timeout=int(values.get("GLM_OCR_REQUEST_TIMEOUT", "900")),
             glm_budget_seconds=int(values.get("GLM_OCR_BUDGET_SECONDS", "900")),
             lit_path=lit,
+            warm_enabled=values.get("GLM_OCR_WARM", "1").strip().lower()
+            not in ("0", "false", "no", "off"),
+            warm_min_interval_seconds=int(values.get("GLM_OCR_WARM_INTERVAL", "300")),
+            warm_daily_cap=int(values.get("GLM_OCR_WARM_DAILY_CAP", "40")),
+            warm_timeout_seconds=int(values.get("GLM_OCR_WARM_TIMEOUT", "120")),
         )
 
     @classmethod

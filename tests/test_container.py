@@ -15,7 +15,9 @@ from fakes import (
     FakeWorkspace,
     registry,
 )
+from ocr_playground.application.warming import WarmStatus
 from ocr_playground.composition.container import Container, build_container
+from ocr_playground.domain.ports import PreWarmable
 from ocr_playground.domain.document import PageLimit, SourceDocument
 from ocr_playground.infrastructure.settings import Settings
 
@@ -122,3 +124,44 @@ def test_settings_default_to_the_deployment_values() -> None:
     assert Settings().max_pages == 5
     assert Settings().preview_max_px == 1400
     assert Settings.from_mapping({}).default_mode == "glm"
+
+
+# --- pre-warming the GPU ---------------------------------------------------------------
+
+
+def test_the_warm_policy_comes_from_configuration() -> None:
+    container = Container()
+    container.config.from_dict({
+        "warm_enabled": True,
+        "warm_min_interval_seconds": 60,
+        "warm_daily_cap": 7,
+        "warm_timeout_seconds": 30,
+    })
+    policy = container.warm_policy()
+
+    assert (policy.enabled, policy.min_interval_seconds, policy.daily_cap, policy.timeout_seconds) == (
+        True,
+        60,
+        7,
+        30,
+    )
+
+
+def test_warming_is_throttled_by_default_and_can_be_switched_off() -> None:
+    assert Container().warm_policy().min_interval_seconds == 300
+    assert Container().warm_policy().daily_cap == 40
+
+    off = build_container({"GLM_OCR_WARM": "0", "GLM_OCR_WARM_DAILY_CAP": "3"})
+    assert off.settings().warm_enabled is False
+    assert off.settings().warm_daily_cap == 3
+    assert off.warmer().request("glm") == WarmStatus.DISABLED
+
+
+def test_only_the_remote_engine_can_be_warmed() -> None:
+    container = build_container({"GLM_OCR_BASE_URL": "https://gpu.example/v1"})
+    assert isinstance(container.engines()["glm"], PreWarmable)
+    assert not isinstance(container.engines()["fast"], PreWarmable)
+
+
+def test_a_host_with_no_endpoint_reports_the_gpu_as_unavailable() -> None:
+    assert Container().warmer().request("glm") == WarmStatus.UNAVAILABLE

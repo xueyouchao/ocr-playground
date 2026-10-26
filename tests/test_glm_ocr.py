@@ -22,6 +22,8 @@ class Stub:
 
     def __init__(self, script) -> None:
         self.requests: list[dict] = []
+        self.gets: list[str] = []
+        self.get_status = 200
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler(script))
         self.server.daemon_threads = True
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -38,6 +40,12 @@ class Stub:
 
             def log_message(self, *args) -> None:
                 pass
+
+            def do_GET(self) -> None:  # noqa: N802 - the warm ping
+                stub.gets.append(self.path)
+                self.send_response(stub.get_status)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
 
             def do_POST(self) -> None:  # noqa: N802
                 length = int(self.headers.get("Content-Length") or 0)
@@ -198,3 +206,30 @@ def test_identity_names_model_prompt_and_endpoint() -> None:
     assert engine.identity() == (
         "glm-ocr model=glm-ocr prompt='Text Recognition:' endpoint=https://gpu.example/v1"
     )
+
+
+# --- waking a scale-to-zero endpoint --------------------------------------------------
+
+
+def test_warm_pings_the_cheapest_endpoint_without_generating(endpoint):
+    stub, engine = endpoint(lambda path, body: completion("never"))
+    assert engine.warm(5) is True
+    assert stub.gets == ["/models"]  # GET, and nothing was generated
+    assert stub.requests == []
+
+
+def test_warm_reports_a_refused_endpoint_instead_of_raising(endpoint):
+    stub, engine = endpoint(lambda path, body: completion("never"))
+    stub.get_status = 503
+    assert engine.warm(5) is False
+
+
+def test_warm_is_false_when_no_endpoint_is_configured():
+    engine = GlmOcrEngine(base_url="", model="m", prompt="p", api_key="k", request_timeout=1)
+    assert engine.warm(5) is False
+
+
+def test_warm_is_false_when_the_host_is_unreachable():
+    engine = GlmOcrEngine(base_url="http://127.0.0.1:9/v1", model="m", prompt="p",
+                          api_key="k", request_timeout=1)
+    assert engine.warm(1) is False  # a dead endpoint must not fail the page that asked

@@ -5,6 +5,7 @@ rather than which function the handler happened to call.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import socket
 import threading
@@ -15,8 +16,20 @@ import urllib.request
 
 import pytest
 
-from fakes import FAST, FakeSlots, StubService, build_rig, sample_document
+from fakes import (
+    FAST,
+    GLM,
+    FakeClock,
+    FakeEngine,
+    FakeSlots,
+    FakeWarmEngine,
+    StubService,
+    build_rig,
+    registry,
+    sample_document,
+)
 from ocr_playground.application.errors import EngineFailure, EngineTimeout, EngineUnavailable
+from ocr_playground.application.warming import EngineWarmer, WarmPolicy
 from ocr_playground.composition.container import Container
 from ocr_playground.domain.errors import UnknownMode
 from ocr_playground.infrastructure.process import CommandTimedOut
@@ -292,3 +305,94 @@ class _Engine:
     @property
     def available(self) -> bool:
         return self._available
+
+
+# --- the intent ping -------------------------------------------------------------------
+
+
+def warmer_for(engine, jobs: list, **policy: object) -> EngineWarmer:
+    return EngineWarmer(
+        engines={"glm": engine, "fast": FakeEngine(FAST)},
+        registry=registry(),
+        clock=FakeClock(),
+        policy=WarmPolicy(**policy),  # type: ignore[arg-type]
+        submit=jobs.append,
+    )
+
+
+def test_the_intent_ping_starts_the_gpu(api):
+    engine = FakeWarmEngine(GLM)
+    jobs: list = []
+    base, container = api(glm_base_url="http://127.0.0.1:9/v1")
+    container.warmer.override(warmer_for(engine, jobs))
+
+    status, headers, body = call(base, "/api/warm", method="POST")
+
+    assert status == 200, body
+    assert json.loads(body) == {"warm": "started"}
+    assert headers.get("Access-Control-Allow-Origin") == "*"
+    assert headers.get("Cache-Control") == "no-store"
+    assert len(jobs) == 1
+
+
+def test_a_second_ping_inside_the_interval_costs_nothing(api):
+    base, container = api(glm_base_url="http://127.0.0.1:9/v1")
+    container.warmer.override(warmer_for(FakeWarmEngine(GLM), [], min_interval_seconds=300))
+
+    first = json.loads(call(base, "/api/warm", method="POST")[2])
+    second = json.loads(call(base, "/api/warm", method="POST")[2])
+
+    assert first == {"warm": "started"}
+    assert second == {"warm": "throttled"}
+
+
+def test_the_intent_ping_can_name_its_mode(api):
+    base, container = api(glm_base_url="http://127.0.0.1:9/v1")
+    jobs: list = []
+    container.warmer.override(warmer_for(FakeWarmEngine(GLM), jobs))
+
+    status, _, body = call(base, "/api/warm", method="POST", headers={"X-Mode": "fast"})
+
+    assert status == 200
+    assert json.loads(body) == {"warm": "not_warmable"}  # the local stack is always ready
+    assert jobs == []
+
+
+def test_the_intent_ping_rejects_a_mode_that_does_not_exist(api):
+    base, _ = api(glm_base_url="http://127.0.0.1:9/v1")
+    status, _, body = call(base, "/api/warm", method="POST", headers={"X-Mode": "magic"})
+    assert status == 400
+    assert "magic" in json.loads(body)["error"]
+
+
+def test_the_intent_ping_is_a_post_only(api):
+    base, _ = api(glm_base_url="http://127.0.0.1:9/v1")
+    status, _, _ = call(base, "/api/warm")
+    assert status == 404  # a crawler or a link prefetch must not rent a GPU
+
+
+def test_warming_an_unconfigured_engine_is_refused(api):
+    base, _ = api()  # no GLM_OCR_BASE_URL, and GLM is the default mode
+    status, _, body = call(base, "/api/warm", method="POST")
+    assert status == 503
+    assert "not configured" in json.loads(body)["error"]
+
+
+def test_a_warm_request_with_a_body_leaves_the_connection_usable(api):
+    """HTTP/1.1 keeps the connection alive, so an unread body would become the next request line."""
+    base, container = api(glm_base_url="http://127.0.0.1:9/v1")
+    container.warmer.override(warmer_for(FakeWarmEngine(GLM), []))
+    parts = urllib.parse.urlsplit(base)
+    connection = http.client.HTTPConnection(parts.hostname, parts.port, timeout=10)
+    headers = {"Content-Type": "application/json", "X-Mode": "glm"}
+    try:
+        connection.request("POST", "/api/warm", body=b'{"eager": true}', headers=headers)
+        first = connection.getresponse()
+        first.read()
+        connection.request("POST", "/api/warm", body=b'{"eager": true}', headers=headers)
+        second = connection.getresponse()
+        second.read()
+    finally:
+        connection.close()
+
+    assert (first.status, second.status) == (200, 200), second.read()

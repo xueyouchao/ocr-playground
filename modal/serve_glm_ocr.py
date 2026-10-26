@@ -37,7 +37,10 @@ MODEL = "zai-org/GLM-OCR"
         "/root/.cache/vllm": compile_cache,
     },
     timeout=3600,
-    scaledown_window=300,
+    # The GPU is billed from boot until this window expires, and the API now starts the boot when
+    # somebody looks like they are about to upload. 120 s keeps a second upload warm without paying
+    # for five idle minutes after every one.
+    scaledown_window=120,
     startup_timeout=1800,
 )
 @modal.web_server(port=8000, startup_timeout=1800)

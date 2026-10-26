@@ -903,6 +903,7 @@ $("preview-all").addEventListener("click", () => {
 // a demo that looks hung for four minutes without explaining itself is worse than a slower honest one.
 
 const UPLOAD_API = "/api/parse";
+const WARM_API = "/api/warm";
 // Optimistic until /api/health says otherwise, so a host without the API behaves as before.
 const MODE_AVAILABLE = { glm: true, fast: true };
 
@@ -963,11 +964,34 @@ async function loadModes() {
   }
 }
 
+// GLM-OCR's container bills GPU time from boot until it scales down, so this fires on intent — the
+// picker choosing GLM, or a pointer or keyboard landing on the uploader — never on page load alone.
+// The server throttles it to one boot per interval and caps the day on top of that; the cooldown here
+// only stops a pointer wandering around the panel from asking twice. It is a cooldown, not a flag,
+// because a page that stays open outlives the GPU: after it has scaled down, the next interaction
+// should be allowed to warm it again.
+const WARM_COOLDOWN_MS = 60000;
+let warmedAt = 0;
+
+function warmGpu() {
+  if (state.mode !== "glm" || !MODE_AVAILABLE.glm) return;
+  if (Date.now() - warmedAt < WARM_COOLDOWN_MS) return;
+  warmedAt = Date.now();
+  // A failed ping clears the cooldown: the GPU may still be cold, so the next interaction tries.
+  fetch(WARM_API, { method: "POST", headers: { "X-Mode": "glm" } }).catch(() => {
+    warmedAt = 0;
+  });
+}
+
+$("uploader").addEventListener("pointerenter", warmGpu);
+$("uploader").addEventListener("focusin", warmGpu);
+
 $("modes").addEventListener("click", (event) => {
   const button = event.target.closest("[data-mode]");
   if (!button || button.disabled) return;
   state.mode = button.dataset.mode;
   applyModes();
+  warmGpu();
   uploadStatus(modeNote(state.mode));
 });
 

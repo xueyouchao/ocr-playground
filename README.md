@@ -79,6 +79,14 @@ body and `X-Mode: glm|fast` (or `?mode=fast`); with neither, it uses GLM-OCR. Th
 `modal deploy modal/serve_glm_ocr.py` app below — cold after idle, so its first read can take
 minutes; that is the trade the page's method picker is there to explain.
 
+`POST /api/warm` starts that cold GPU before an upload needs it. The page sends it when somebody
+picks GLM or reaches for the uploader, so the boot overlaps with the seconds they spend choosing a
+file. A warm container bills GPU time from boot until `scaledown_window` after the last request, so
+the server throttles it to one per `GLM_OCR_WARM_INTERVAL` (300 s) and at most `GLM_OCR_WARM_DAILY_CAP`
+(40) per rolling day; `GLM_OCR_WARM=0` turns it off and `GLM_OCR_WARM_TIMEOUT` bounds the wait. It is
+deliberately not on `GET /api/health`: warming every page view would rent a GPU for a trickle of
+traffic.
+
 In production the service runs as its own container behind the same Traefik router
 (`deploy/README.md`), which is why the page calls `/api/parse` on its own origin.
 

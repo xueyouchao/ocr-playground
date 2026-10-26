@@ -61,6 +61,26 @@ class GlmOcrEngine:
             f"glm-ocr model={self._model} prompt={self._prompt!r} endpoint={self._base_url}"
         )
 
+    def warm(self, timeout: float = 120) -> bool:
+        """Ask a scale-to-zero endpoint to boot, without generating anything.
+
+        `GET /models` is the cheapest thing vLLM answers. Against a cold container the request simply
+        hangs until the engine is up — that wait is the point: it happens here, while somebody is
+        still choosing a file, instead of after they press read.
+        """
+        if not self.available:
+            return False
+        request = urllib.request.Request(
+            self._base_url + "/models",
+            headers={"Authorization": f"Bearer {self._api_key}"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return response.status == 200
+        except (OSError, urllib.error.URLError):
+            return False
+
     def read(self, page: PageImage, deadline: float | None = None) -> str:
         raw = page.path.read_bytes()
         # An upload keeps its own bytes, so the suffix is not proof of the format; the first two

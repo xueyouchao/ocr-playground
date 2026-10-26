@@ -19,6 +19,7 @@ from dependency_injector import containers, providers
 
 from ..application.capacity import ParseSlots
 from ..application.read_document import ReadDocumentService
+from ..application.warming import EngineWarmer, WarmPolicy
 from ..domain.engine import EngineRegistry
 from ..domain.ports import PageOcr
 from ..infrastructure.engines import GlmOcrEngine, LiteParseEngine
@@ -84,6 +85,17 @@ class Container(containers.DeclarativeContainer):
         budget_seconds=settings.provided.glm_budget_seconds,
         max_pages=settings.provided.max_pages,
     )
+    warm_policy = providers.Singleton(
+        WarmPolicy,
+        enabled=settings.provided.warm_enabled,
+        min_interval_seconds=settings.provided.warm_min_interval_seconds,
+        daily_cap=settings.provided.warm_daily_cap,
+        timeout_seconds=settings.provided.warm_timeout_seconds,
+    )
+    warmer = providers.Singleton(
+        EngineWarmer, engines=engines, registry=registry, clock=clock, policy=warm_policy,
+    )
+
     parse_slots = providers.Singleton(
         ParseSlots,
         size=settings.provided.parse_slots,
