@@ -11,14 +11,28 @@ from collections.abc import Mapping
 from ...domain.engine import EngineRegistry
 from ...domain.ports import PageOcr
 
+_GPU_COLD = "scale-to-zero GPU; the first upload after idle takes about 3 minutes"
+
 MODE_COPY: dict[str, dict[str, object]] = {
     "glm": {
         "cold_start": True,
-        "detail": "0.9B VLM on a scale-to-zero GPU; the first upload after idle can take minutes",
+        "detail": f"0.9B VLM on a {_GPU_COLD}",
     },
     "fast": {
         "cold_start": False,
         "detail": "CPU OCR on this server; a couple of seconds per page",
+    },
+    "chandra": {
+        "cold_start": True,
+        "detail": f"Chandra 2 on a {_GPU_COLD}; returns layout markdown",
+    },
+    "nemotron": {
+        "cold_start": True,
+        "detail": f"Nemotron 3.5 Parse on a {_GPU_COLD}; returns markdown with tables",
+    },
+    "unlimited": {
+        "cold_start": True,
+        "detail": f"Unlimited-OCR on a {_GPU_COLD}; crops and stitches long pages",
     },
 }
 

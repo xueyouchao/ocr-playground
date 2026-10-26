@@ -18,12 +18,17 @@ DEFAULT_LIT = "/home/ubuntu/ingestion-engine/.venv/bin/lit"
 
 @dataclass(frozen=True, slots=True)
 class Settings:
-    # The GLM-OCR endpoint: any OpenAI-compatible server. Empty means "fast path only".
+    # The VLM endpoints: each is any OpenAI-compatible server. An empty URL means that mode is
+    # unavailable on this host, and the page greys it out rather than failing an upload.
     glm_base_url: str = ""
     glm_model: str = "glm-ocr"
     glm_api_key: str = "not-needed"
     glm_prompt: str = "Text Recognition:"
     glm_request_timeout: int = 900
+
+    chandra_base_url: str = ""
+    nemotron_base_url: str = ""
+    unlimited_base_url: str = ""
 
     # One budget for a whole document, cold start included. Five pages at ~20 s is 100 s; the rest
     # is boot.
@@ -62,6 +67,9 @@ class Settings:
             glm_api_key=values.get("GLM_OCR_API_KEY", "") or "not-needed",
             glm_prompt=values.get("GLM_OCR_PROMPT", "Text Recognition:"),
             glm_request_timeout=int(values.get("GLM_OCR_REQUEST_TIMEOUT", "900")),
+            chandra_base_url=values.get("CHANDRA_OCR_BASE_URL", "").rstrip("/"),
+            nemotron_base_url=values.get("NEMOTRON_PARSE_BASE_URL", "").rstrip("/"),
+            unlimited_base_url=values.get("UNLIMITED_OCR_BASE_URL", "").rstrip("/"),
             glm_budget_seconds=int(values.get("GLM_OCR_BUDGET_SECONDS", "900")),
             lit_path=lit,
             warm_enabled=values.get("GLM_OCR_WARM", "1").strip().lower()

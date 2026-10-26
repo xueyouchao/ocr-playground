@@ -62,23 +62,32 @@ stdlib-only and does not import the service's container.
 
 The upload service is a separate process, wired with
 [python-dependency-injector](https://github.com/ets-labs/python-dependency-injector). Create the venv
-once, then run it beside the page. GLM-OCR is the default and needs an OpenAI-compatible endpoint;
-without one the server stays up but only the fast path is available:
+once, then run it beside the page. Each VLM parser needs its own OpenAI-compatible endpoint; the
+ones without an endpoint simply show as unavailable in the page's dropdown:
 
 ```bash
 make venv                                     # dependency-injector + pytest
-GLM_OCR_BASE_URL=https://<your-modal-app>.modal.run/v1 make api
+GLM_OCR_BASE_URL=https://<glm-app>.modal.run/v1 \
+CHANDRA_OCR_BASE_URL=https://<chandra-app>.modal.run/v1 \
+NEMOTRON_PARSE_BASE_URL=https://<nemotron-app>.modal.run/v1 \
+UNLIMITED_OCR_BASE_URL=https://<unlimited-app>.modal.run/v1 \
+make api
 make api                                      # no endpoint: fast (LiteParse + Tesseract) only
 ```
+
+The four GPU apps are `modal deploy modal/serve_{glm_ocr,chandra,nemotron,unlimited}.py`, one L4
+each, all scaled to zero when idle. They share one HF cache volume, so the first boot of each pays
+for its own weights once.
 
 `make test` runs the offline suite (no GPU, no LiteParse, no poppler). The fast path needs LiteParse
 (`pip install liteparse==2.17.0`, which provides the `lit` CLI) and Tesseract on the host or in the
 image.
 
-`GET /api/health` reports which modes this server can run. `POST /api/parse` takes the file as the
-body and `X-Mode: glm|fast` (or `?mode=fast`); with neither, it uses GLM-OCR. The GLM path is the
-`modal deploy modal/serve_glm_ocr.py` app below — cold after idle, so its first read can take
-minutes; that is the trade the page's method picker is there to explain.
+`GET /api/health` reports which modes this server can run — `glm`, `fast`, `chandra`, `nemotron`,
+`unlimited`, each with its name, availability and cold-start note, which is what the page's dropdown
+is built from. `POST /api/parse` takes the file as the body and `X-Mode: glm|fast|chandra|nemotron|
+unlimited` (or `?mode=`); with neither, it uses GLM-OCR. Every GPU path is cold after idle, so its
+first read takes about three minutes; that is the trade the dropdown is there to explain.
 
 `POST /api/warm` starts that cold GPU before an upload needs it. The page sends it when somebody
 picks GLM or reaches for the uploader, so the boot overlaps with the seconds they spend choosing a

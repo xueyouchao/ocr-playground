@@ -60,7 +60,17 @@ class ReadDocumentService:
         return engine
 
     def _unavailable_message(self, mode: str, spec: EngineSpec) -> str:
-        alternative = self.registry.alternative_to(mode)
+        # Prefer a different *kind* of engine: a GPU parser that is not configured should point at
+        # the CPU path, which is ready, rather than at another GPU that may be just as cold.
+        runnable = [
+            candidate for candidate in self.registry.modes
+            if candidate != mode and self._engines[candidate].available
+        ]
+        alternative = next(
+            (candidate for candidate in runnable
+             if self.registry.spec(candidate).kind != spec.kind),
+            runnable[0] if runnable else None,
+        )
         if alternative is None:
             return f"{spec.name} is not configured on this server"
         other = self.registry.spec(alternative)

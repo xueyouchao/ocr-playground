@@ -41,13 +41,15 @@
                      background: var(--accent); color: #fff; cursor: pointer; }
   .uploader button.ghost { background: #fff; color: var(--accent); border-color: var(--line); }
   .uploader button:disabled { opacity: .5; cursor: default; }
-  .modes { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-  .modes button { text-transform: none; letter-spacing: 0; font: 600 11px/1.3 var(--mono);
-                  padding: 7px 10px; border-radius: 7px; border: 1px solid var(--line);
-                  background: #fff; color: var(--soft); text-align: left; }
-  .modes button small { display: block; font: 10.5px/1.35 var(--mono); font-weight: 500; color: var(--soft); }
-  .modes button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
-  .modes button[aria-pressed="true"] small { color: var(--accent); }
+  .modes { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .modes label { font: 600 10.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase;
+                 color: var(--soft); }
+  .modes select { font: 600 11.5px/1.3 var(--mono); padding: 7px 10px; border-radius: 7px;
+                  border: 1px solid var(--line); background: #fff; color: var(--ink);
+                  max-width: 22ch; cursor: pointer; }
+  .modes select:disabled { opacity: .5; cursor: default; }
+  .modes select option:disabled { color: var(--soft); }
+  .modes small { flex-basis: 100%; font: 10.5px/1.4 var(--mono); color: var(--soft); min-height: 1.4em; }
   .upload-status { grid-column: 1 / -1; margin: 0; font: 12px var(--mono); color: var(--soft); min-height: 1em; }
   .upload-status.error { color: var(--bad); }
   @media (max-width: 720px) { .uploader { grid-template-columns: 1fr; } .uploader .actions { justify-content: flex-start; } }
@@ -141,17 +143,19 @@
 <section class="uploader" id="uploader">
   <div>
     <b>Read your own document</b>
-    <span>A PDF (up to 5 pages) or a single image. <b>GLM-OCR</b> is the default and reads handwriting and
-      tables best, but it runs on a scale-to-zero GPU: after the site has been idle, <b>the first upload
-      can take 3 minutes on average</b> while the model boots, before it reads a single page. It then
+    <span>A PDF (up to 5 pages) or a single image. The VLM parsers — <b>GLM-OCR</b> by default — read
+      handwriting and tables best, but each runs on its own scale-to-zero GPU: after it has been idle,
+      <b>the first upload can take 3 minutes on average</b> while the model boots. After that it
       <b>stays warm for 2 minutes after the last request</b>, so <b>another upload inside that window takes
-      about 5 seconds a page</b>. <b>LiteParse + Tesseract</b> is the fast option — a couple of seconds per page on this server's CPU — and visibly
-      weaker on handwriting.</span>
-    <div class="modes" id="modes" role="group" aria-label="extraction method">
-      <button data-mode="glm" aria-pressed="true">GLM-OCR
-        <small>best · cold start, ~3 minutes</small></button>
-      <button data-mode="fast" aria-pressed="false">LiteParse + Tesseract
-        <small>fast · a couple of seconds per page</small></button>
+      about 5 seconds a page</b>. <b>LiteParse + Tesseract</b> is the fast option — a couple of seconds per
+      page on this server's CPU — and visibly weaker on handwriting.</span>
+    <div class="modes" id="modes">
+      <label for="mode">read it with</label>
+      <select id="mode" aria-label="extraction method">
+        <option value="glm">GLM-OCR</option>
+        <option value="fast">LiteParse + Tesseract</option>
+      </select>
+      <small id="mode-detail" aria-live="polite"></small>
     </div>
   </div>
   <div class="actions">
@@ -897,16 +901,15 @@ $("preview-all").addEventListener("click", () => {
 });
 
 // ---------- read your own document ----------
-// The upload runs on the same origin, behind the same Traefik router (`/api`). There are two
-// extraction paths. GLM-OCR, on a scale-to-zero GPU, is the default and reads handwriting and tables
-// best; after idle it pays a cold start of minutes before the first page comes back. LiteParse +
-// Tesseract, on this server's CPU, answers in seconds. The panel says both of those things, because
-// a demo that looks hung for four minutes without explaining itself is worse than a slower honest one.
+// The upload runs on the same origin, behind the same Traefik router (`/api`). The VLM parsers —
+// GLM-OCR by default, plus the others this host has an endpoint for — run on scale-to-zero GPUs,
+// read handwriting and tables best, and pay a cold start of about three minutes before the first
+// page comes back. LiteParse + Tesseract, on this server's CPU, answers in seconds. The panel says
+// both of those things, because a demo that looks hung for three minutes without explaining itself
+// is worse than a slower honest one.
 
 const UPLOAD_API = "/api/parse";
 const WARM_API = "/api/warm";
-// Optimistic until /api/health says otherwise, so a host without the API behaves as before.
-const MODE_AVAILABLE = { glm: true, fast: true };
 
 function uploadStatus(message, isError) {
   const line = $("upload-status");
@@ -914,25 +917,34 @@ function uploadStatus(message, isError) {
   line.classList.toggle("error", Boolean(isError));
 }
 
-function modeButtons() {
-  return $("modes").querySelectorAll("[data-mode]");
+// The picker is a dropdown because the server can now run several VLM parsers, each on its own
+// GPU. The list is built from /api/health, so a parser the host has no endpoint for shows up
+// labelled and unselectable rather than failing an upload.
+const MODE_AVAILABLE = { glm: true, fast: true };
+const MODE_COLD = { glm: true, fast: false };
+const MODE_NAME = { glm: "GLM-OCR", fast: "LiteParse + Tesseract" };
+const MODE_DETAIL = {};
+
+function modeSelect() {
+  return $("mode");
 }
 
 // A read that is already running owns the picker: /api/health can resolve after the request went
-// out, and re-enabling the buttons then would only mislabel a request that has already been sent.
+// out, and re-enabling the control then would only mislabel a request that has already been sent.
 let uploadBusy = false;
 
 function applyModes() {
-  for (const button of modeButtons()) {
-    button.setAttribute("aria-pressed", String(state.mode === button.dataset.mode));
-    button.disabled = uploadBusy || !MODE_AVAILABLE[button.dataset.mode];
+  const select = modeSelect();
+  select.value = state.mode;
+  for (const option of select.options) {
+    option.disabled = uploadBusy || !MODE_AVAILABLE[option.value];
   }
+  select.disabled = uploadBusy;
+  $("mode-detail").textContent = MODE_DETAIL[state.mode] || "";
 }
 
 function modeNote(mode = state.mode) {
-  return mode === "glm"
-    ? "GLM-OCR runs on a scale-to-zero GPU — a cold start takes about 3 minutes on average; LiteParse + Tesseract is the fast option"
-    : "LiteParse + Tesseract runs on this server's CPU — a couple of seconds per page";
+  return MODE_DETAIL[mode] || "";
 }
 
 function setUploadBusy(busy) {
@@ -942,21 +954,35 @@ function setUploadBusy(busy) {
   applyModes();
 }
 
-// The server is the only thing that knows whether a GLM endpoint is configured for it. Ask once on
-// load: with no endpoint, default to fast and say why rather than failing the first upload.
+// The server is the only thing that knows which endpoints this host has. Ask once on load: parse
+// every mode it reports, default to the one it names when that one can run, and explain a fallback
+// instead of failing the first upload.
 async function loadModes() {
   try {
     const response = await fetch("/api/health");
     if (!response.ok) return;
     const health = await response.json();
+    const select = modeSelect();
+    select.innerHTML = "";
     for (const mode of health.modes || []) {
-      if (mode.id in MODE_AVAILABLE) MODE_AVAILABLE[mode.id] = mode.available !== false;
+      MODE_AVAILABLE[mode.id] = mode.available !== false;
+      MODE_COLD[mode.id] = mode.cold_start === true;
+      MODE_NAME[mode.id] = mode.name;
+      MODE_DETAIL[mode.id] = mode.detail || "";
+      const option = document.createElement("option");
+      option.value = mode.id;
+      option.textContent = mode.available === false ? `${mode.name} — not configured` : mode.name;
+      select.append(option);
     }
-    if (!MODE_AVAILABLE.glm && state.mode === "glm") {
-      state.mode = "fast";
+    if (MODE_AVAILABLE[health.default_mode]) {
+      state.mode = health.default_mode;
+    } else if (!MODE_AVAILABLE[state.mode]) {
+      const fallback = [...select.options].find((option) => !option.disabled);
+      state.mode = fallback ? fallback.value : state.mode;
       // Do not talk over a read that is already running; its status describes the request it sent.
       if (!uploadBusy) {
-        uploadStatus("GLM-OCR is not configured on this server; using the fast option (LiteParse + Tesseract).");
+        uploadStatus(`${MODE_NAME[health.default_mode] || "The default parser"} is not configured on `
+          + `this server; using ${MODE_NAME[state.mode] || state.mode}.`);
       }
     }
     applyModes();
@@ -965,21 +991,22 @@ async function loadModes() {
   }
 }
 
-// GLM-OCR's container bills GPU time from boot until it scales down, so this fires on intent — the
-// picker choosing GLM, or a pointer or keyboard landing on the uploader — never on page load alone.
-// The server throttles it to one boot per interval and caps the day on top of that; the cooldown here
-// only stops a pointer wandering around the panel from asking twice. It is a cooldown, not a flag,
-// because a page that stays open outlives the GPU: after it has scaled down, the next interaction
-// should be allowed to warm it again.
+// A VLM parser's container bills GPU time from boot until it scales down, so this fires on intent —
+// the dropdown choosing that parser, or a pointer or keyboard landing on the uploader — never on
+// page load alone, and never for the CPU path. The server throttles it to one boot per interval and
+// caps the day on top of that; the cooldown here only stops a pointer wandering around the panel
+// from asking twice. It is a cooldown, not a flag, because a page that stays open outlives the GPU:
+// after it has scaled down, the next interaction should be allowed to warm it again.
 const WARM_COOLDOWN_MS = 60000;
 let warmedAt = 0;
 
 function warmGpu() {
-  if (state.mode !== "glm" || !MODE_AVAILABLE.glm) return;
+  if (!MODE_COLD[state.mode] || !MODE_AVAILABLE[state.mode]) return;
   if (Date.now() - warmedAt < WARM_COOLDOWN_MS) return;
   warmedAt = Date.now();
+  const mode = state.mode;
   // A failed ping clears the cooldown: the GPU may still be cold, so the next interaction tries.
-  fetch(WARM_API, { method: "POST", headers: { "X-Mode": "glm" } }).catch(() => {
+  fetch(WARM_API, { method: "POST", headers: { "X-Mode": mode } }).catch(() => {
     warmedAt = 0;
   });
 }
@@ -987,10 +1014,8 @@ function warmGpu() {
 $("uploader").addEventListener("pointerenter", warmGpu);
 $("uploader").addEventListener("focusin", warmGpu);
 
-$("modes").addEventListener("click", (event) => {
-  const button = event.target.closest("[data-mode]");
-  if (!button || button.disabled) return;
-  state.mode = button.dataset.mode;
+$("mode").addEventListener("change", () => {
+  state.mode = modeSelect().value;
   applyModes();
   warmGpu();
   uploadStatus(modeNote(state.mode));

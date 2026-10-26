@@ -78,12 +78,21 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write(f"{self.address_string()} {fmt % args}\n")
 
     def _json(self, status: HTTPStatus, body: dict) -> None:
+        # A POST that was answered before its body was read (a rejected mode, a busy slot) must not
+        # leave those bytes in front of the next request on a kept-alive connection. `http.server`
+        # honours close_connection but does not announce it, so the header says so explicitly —
+        # without it the client reuses a socket that is already closed.
+        closing = getattr(self, "_body_read", True) is False
+        if closing:
+            self.close_connection = True
         encoded = json.dumps(body).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(encoded)))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Cache-Control", "no-store")
+        if closing:
+            self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(encoded)
 
@@ -141,11 +150,13 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             length = 0
         if length <= 0:
+            self._body_read = True  # nothing was declared, so nothing is left over
             return
         if length > limit:
             self.close_connection = True
             return
         self.rfile.read(length)
+        self._body_read = True
 
     def _warm(self) -> None:
         """Start a cold engine booting on intent, and say whether it started.
@@ -163,6 +174,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json(HTTPStatus.OK, {"warm": self.container.warmer().request(mode).value})
 
     def do_POST(self) -> None:  # noqa: N802
+        self._body_read = False
         if self.path.split("?")[0] == "/api/warm":
             self._warm()
             return
@@ -176,6 +188,7 @@ class Handler(BaseHTTPRequestHandler):
             length = 0
         settings = self.container.settings()
         if length <= 0:
+            self._body_read = True
             self._json(HTTPStatus.LENGTH_REQUIRED, {"error": "send the file as the request body"})
             return
         if length > settings.max_upload_bytes:
@@ -202,6 +215,7 @@ class Handler(BaseHTTPRequestHandler):
             with self.container.parse_slots().hold():
                 try:
                     payload = self.rfile.read(length)
+                    self._body_read = True
                 except TimeoutError:
                     self._json(HTTPStatus.REQUEST_TIMEOUT, {"error": "the upload stalled; send it again"})
                     return
