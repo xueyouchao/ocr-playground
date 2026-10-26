@@ -991,6 +991,12 @@ async function loadModes() {
           + `this server; using ${MODE_NAME[state.mode] || state.mode}.`);
       }
     }
+    // A server whose modes do not include the markup's default would leave the dropdown blank and
+    // the upload with no mode at all; settle on something this host can actually run.
+    if (![...select.options].some((option) => option.value === state.mode)) {
+      const first = [...select.options].find((option) => MODE_AVAILABLE[option.value]);
+      if (first) state.mode = first.value;
+    }
     applyModes();
   } catch {
     // A plain static host has no /api; keep the default and let the upload report the failure.
