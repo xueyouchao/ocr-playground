@@ -66,6 +66,29 @@ minutes; that is the trade the page's method picker is there to explain.
 In production the service runs as its own container behind the same Traefik router
 (`deploy/README.md`), which is why the page calls `/api/parse` on its own origin.
 
+### Index a corpus with CocoIndex
+
+The upload API reads one document per request. The same pipeline (`pipeline.py`) is also a CocoIndex
+app, so a directory can be read incrementally — a file that did not change is not read again, and
+changing a file, the mode or the model re-reads only what that change affects.
+
+```bash
+python3 -m venv .venv-index
+.venv-index/bin/pip install -r requirements-cocoindex.txt
+.venv-index/bin/cocoindex update main.py            # corpus/ -> out/, default mode
+
+OCR_CORPUS=scans OCR_MODE=fast .venv-index/bin/cocoindex update main.py
+```
+
+It declares `out/documents/<path>.json` (per-page text and counts, plus the digest it was read
+from), `out/pages.jsonl` (one row per page) and `out/summary.json` (what ran, what failed, what was
+skipped). Reads are memoised in `cocoindex.db` on content digest + mode + engine identity + page
+limit; delete it to force a full re-read. `OCR_MODE` defaults to `glm` when `GLM_OCR_BASE_URL` is set
+and `fast` otherwise; `OCR_MAX_PAGES` defaults to every page (the upload API caps at 5), and
+`OCR_CORPUS` / `OCR_OUT` / `OCR_DB` name the rest. The fast path needs `lit`; GLM needs the endpoint
+above. The indexer is optional — the page and the API stay stdlib-only, and
+`requirements-cocoindex.txt` pins the one extra dependency.
+
 Re-running a parser writes its record; then `make site` picks it up:
 
 ```bash
@@ -138,6 +161,10 @@ modal/                   one app per GPU parser, all scale-to-zero
 records/<id>.json        {"page-1": "text…", …} — raw output, never hand-edited
 systems.json             the roster the page renders (name, pipeline, device, how to run)
 api/server.py            the upload service: GLM-OCR by default, LiteParse + Tesseract for speed
+pipeline.py              the reading both the API and the indexer call (render + GLM-OCR / LiteParse)
+main.py                  CocoIndex entry point: index a corpus into out/ incrementally
+indexer/flow.py          walk OCR_CORPUS, memoise a read per digest+mode+identity, declare out/
+requirements-cocoindex.txt  the indexer's one optional dependency, pinned
 collect.py               records + roster -> evidence.json
 build.py                 template.html + evidence.json -> index.html
 template.html            the page: source rail, eight panes, text/preview per pane

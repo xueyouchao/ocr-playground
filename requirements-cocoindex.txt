@@ -1,0 +1,4 @@
+# The indexer is optional: the page and the upload API stay stdlib-only. Pinned exactly, like
+# ingestion-engine's pipeline, because a different CocoIndex can change memo keys and target state and
+# so re-read or re-declare a corpus that did not change.
+cocoindex==1.0.25

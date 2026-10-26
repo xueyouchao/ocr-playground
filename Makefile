@@ -2,8 +2,9 @@
 PY        ?= python3
 PORT      ?= 8080
 SITE_DIR  ?= /home/ubuntu/sites/ocr-playground
+COCOINDEX ?= cocoindex
 
-.PHONY: help pages records site serve publish api clean
+.PHONY: help pages records site serve publish api index clean
 
 help:
 	@echo "make pages    render corpus/document.pdf -> /tmp/ocr-playground/pages + assets/pages"
@@ -12,6 +13,7 @@ help:
 	@echo "make serve    serve the site on :$(PORT)"
 	@echo "make publish  copy index.html + assets/ to $(SITE_DIR) (see deploy/)"
 	@echo "make api      run the upload service on :8090 (GLM_OCR_BASE_URL=… for GLM-OCR)"
+	@echo "make index    read OCR_CORPUS into out/ incrementally (needs requirements-cocoindex.txt)"
 	@echo "make clean    drop evidence.json and index.html"
 
 pages:
@@ -32,6 +34,9 @@ serve:
 
 api:
 	$(PY) api/server.py --port 8090
+
+index:
+	$(COCOINDEX) update main.py
 
 publish: site
 	# two explicit syncs: `rsync -a --delete index.html assets/ dest/` would flatten assets/
