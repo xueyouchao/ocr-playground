@@ -6,6 +6,8 @@ supplies the control-token prompt rather than passing a visitor's text through.
     modal deploy serve_nemotron.py
     runners/vlm_endpoint.py --id nemotron-parse --model nemotron --base-url https://…/v1
 """
+from pathlib import Path
+
 import modal
 
 hf_cache = modal.Volume.from_name("ocr-playground-hf", create_if_missing=True)
@@ -32,7 +34,7 @@ image = (
     .env({"HF_HUB_ENABLE_HF_TRANSFER": "1"})
     # NVIDIA's postprocessing helpers, downloaded from the model repo: they turn the raw
     # <class_X><bbox> stream into markdown with HTML tables, which is what the model card documents.
-    .add_local_dir("nemotron_helper", remote_path="/opt/nemotron")
+    .add_local_dir(Path(__file__).resolve().parent / "nemotron_helper", remote_path="/opt/nemotron")
 )
 
 app = modal.App("ocr-playground-nemotron")

@@ -289,8 +289,31 @@ function withImagePlaceholders(html) {
   return html.replace(/<img\b[^>]*>/gi, '<span class="img-gone">image not shipped</span>');
 }
 
+// A cell can mix formats: Nemotron emits "## heading" around a raw <table>, Chandra emits whole HTML
+// documents. Choosing one format for the cell mangles the other, so block-level HTML is preserved and
+// the Markdown between those blocks is converted.
+const HTML_BLOCK = /<(table|figure|div|p|ul|ol|h[1-6]|blockquote|pre)\b[\s\S]*?<\/\1>|<img\b[^>]*>/gi;
+
+function mixedToHtml(text) {
+  let html = "";
+  let cursor = 0;
+  HTML_BLOCK.lastIndex = 0;
+  for (let match = HTML_BLOCK.exec(text); match; match = HTML_BLOCK.exec(text)) {
+    html += markdownToHtml(text.slice(cursor, match.index));
+    html += withImagePlaceholders(match[0]);
+    cursor = match.index + match[0].length;
+  }
+  return html + markdownToHtml(text.slice(cursor));
+}
+
+function isHtmlDocument(text) {
+  return /^\s*(<!doctype|<html|<body)/i.test(text);
+}
+
 function previewDocument(text) {
-  const body = isHtml(text) ? withImagePlaceholders(text) : markdownToHtml(text);
+  const body = isHtmlDocument(text)
+    ? withImagePlaceholders(text)
+    : isHtml(text) ? mixedToHtml(text) : markdownToHtml(text);
   return `<!doctype html><html><head><meta charset="utf-8"><style>${PREVIEW_STYLE}</style></head>`
     + `<body>${body}</body></html>`;
 }
@@ -423,7 +446,7 @@ async function readUpload(file) {
       method: "POST",
       headers: {
         "Content-Type": file.type || "application/octet-stream",
-        "X-Filename": file.name,
+        "X-Filename": encodeURIComponent(file.name),
       },
       body: file,
     });
@@ -467,11 +490,6 @@ $("back-to-sample").addEventListener("click", () => {
   uploadStatus("");
   render();
 });
-
-if (location.hostname.endsWith("github.io")) {
-  setUploadBusy(true);
-  uploadStatus("this mirror is static — uploads run on https://ocr-playground.srv1567269.hstgr.cloud");
-}
 
 function render() {
   renderRail();

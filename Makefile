@@ -17,6 +17,12 @@ help:
 pages:
 	$(PY) prepare.py
 
+# records/ is already populated. Re-running a parser is a per-parser command with its own environment
+# (see README), so this target explains itself rather than exiting 0 having done nothing.
+records:
+	@echo "records/ is populated; re-run one parser from runners/ or modal/ (README 'Run it'), then 'make site'"
+
+
 site:
 	$(PY) collect.py
 	$(PY) build.py

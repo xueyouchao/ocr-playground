@@ -81,7 +81,7 @@ Modal deployment. Cold Modal endpoints answer with a `303`; the runner follows i
 It is a static site: `index.html`, `assets/pages/*.jpg`, nothing else is needed at runtime.
 
 ```bash
-rsync -av --delete index.html assets/ user@host:/var/www/ocr-playground/
+rsync -av --delete index.html assets user@host:/var/www/ocr-playground/
 ```
 
 `deploy/nginx.conf` is a minimal server block with cache headers for the page images. Any static host

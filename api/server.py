@@ -24,6 +24,7 @@ import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import unquote
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_PAGES = 5
@@ -82,8 +83,13 @@ def preview_data_url(image: Path) -> str:
 
 def render_pages(source: Path, scratch: Path, media_type: str) -> list[Path]:
     if media_type in IMAGE_TYPES:
+        # Parse the bytes that arrived. Round-tripping a PNG through ImageMagick rewrites it as an
+        # 8-bit grayscale palette image, and OCR reads half the page: 111 chars instead of 407 on the
+        # sample form. Only the formats LiteParse cannot open take the conversion path.
+        if media_type in {"image/png", "image/jpeg"}:
+            return [source]
         single = scratch / "page-1.png"
-        run(["convert", str(source), "-density", str(RENDER_DPI), str(single)])
+        run(["convert", str(source), "-colorspace", "sRGB", str(single)])
         return [single]
 
     info = run(["pdfinfo", str(source)])
@@ -129,6 +135,10 @@ def parse_document(payload: bytes, media_type: str, name: str) -> dict:
 class Handler(BaseHTTPRequestHandler):
     server_version = "ocr-playground"
     protocol_version = "HTTP/1.1"
+    # A client that declares a length and then goes quiet must not own a thread indefinitely; the
+    # socket timeout bounds the read, and the parse slot is taken *before* the read so stalled
+    # uploads queue behind the same two-slot bound as real work.
+    timeout = 30
 
     def log_message(self, fmt: str, *args) -> None:  # quieter logs
         sys.stderr.write("%s %s\n" % (self.address_string(), fmt % args))
@@ -179,12 +189,23 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
 
-        payload = self.rfile.read(length)
-        name = self.headers.get("X-Filename") or "upload"
+        # The filename arrives percent-encoded: a header value is Latin-1, so "扫描.pdf" cannot ride
+        # in it verbatim.
+        name = unquote(self.headers.get("X-Filename") or "upload")
         media_type = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
 
         if not _SLOTS.acquire(timeout=30):
             self._json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "busy, try again in a moment"})
+            return
+        try:
+            payload = self.rfile.read(length)
+        except TimeoutError:
+            _SLOTS.release()
+            self._json(HTTPStatus.REQUEST_TIMEOUT, {"error": "the upload stalled; send it again"})
+            return
+        if len(payload) != length:
+            _SLOTS.release()
+            self._json(HTTPStatus.REQUEST_TIMEOUT, {"error": "the upload ended early; send it again"})
             return
         try:
             document = parse_document(payload, media_type, name)

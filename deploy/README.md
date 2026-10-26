@@ -48,7 +48,7 @@ temporary directory. Add rate limiting before pointing it at anything that matte
 ## Anywhere else
 
 ```bash
-rsync -av --delete index.html assets/ user@host:/var/www/ocr-playground/
+rsync -av --delete index.html assets user@host:/var/www/ocr-playground/
 ```
 
 `deploy/nginx.conf` is a standalone server block for a plain nginx host, including the cache headers
