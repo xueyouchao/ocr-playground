@@ -29,7 +29,6 @@ class Settings:
     chandra_base_url: str = ""
     nemotron_base_url: str = ""
     unlimited_base_url: str = ""
-    mineru_base_url: str = ""
 
     # One budget for a whole document, cold start included. Five pages at ~20 s is 100 s; the rest
     # is boot.
@@ -71,7 +70,6 @@ class Settings:
             chandra_base_url=values.get("CHANDRA_OCR_BASE_URL", "").rstrip("/"),
             nemotron_base_url=values.get("NEMOTRON_PARSE_BASE_URL", "").rstrip("/"),
             unlimited_base_url=values.get("UNLIMITED_OCR_BASE_URL", "").rstrip("/"),
-            mineru_base_url=values.get("MINERU_BASE_URL", "").rstrip("/"),
             glm_budget_seconds=int(values.get("GLM_OCR_BUDGET_SECONDS", "900")),
             lit_path=lit,
             warm_enabled=values.get("GLM_OCR_WARM", "1").strip().lower()

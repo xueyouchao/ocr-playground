@@ -89,7 +89,7 @@ def test_health_reports_modes_and_limits(api) -> None:
     assert health["ok"] is True
     assert health["default_mode"] == "glm"
     modes = {mode["id"]: mode for mode in health["modes"]}
-    assert tuple(modes) == ("glm", "fast", "chandra", "nemotron", "unlimited", "mineru")
+    assert tuple(modes) == ("glm", "fast", "chandra", "nemotron", "unlimited")
     assert modes["glm"] == {
         "id": "glm",
         "name": "GLM-OCR",

@@ -37,10 +37,6 @@ MODE_COPY: dict[str, dict[str, object]] = {
         "cold_start": True,
         "detail": "Unlimited-OCR on a scale-to-zero GPU; about 45 s a page, crops and stitches long pages",
     },
-    "mineru": {
-        "cold_start": True,
-        "detail": "MinerU 2.5 on a scale-to-zero GPU; its VLM backend, about 70 s a page",
-    },
 }
 
 

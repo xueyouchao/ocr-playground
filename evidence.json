@@ -67,7 +67,7 @@
    "kind": "document pipeline",
    "pipeline": "VLM backend: MinerU2.5-1.2B + layout/table models, all on GPU",
    "device": "GPU (Modal L4)",
-   "needs": "Modal app ocr-playground-mineru; MinerU 2.7.6, VLM backend"
+   "needs": "Modal app ocr-playground-mineru-gpu; MinerU 2.7.6, no endpoint"
   }
  ],
  "pages": [

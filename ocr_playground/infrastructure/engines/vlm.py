@@ -54,15 +54,6 @@ NEMOTRON_SPEC = EngineSpec(
     needs="NEMOTRON_PARSE_BASE_URL",
 )
 
-MINERU_SPEC = EngineSpec(
-    id="mineru-gpu",
-    name="MinerU 2.5 (VLM)",
-    kind="vlm",
-    pipeline="MinerU2.5-1.2B with its layout and table models on a Modal L4 — page-by-page markdown",
-    device="GPU (Modal L4)",
-    needs="MINERU_BASE_URL",
-)
-
 UNLIMITED_SPEC = EngineSpec(
     id="unlimited-ocr",
     name="Unlimited-OCR",
