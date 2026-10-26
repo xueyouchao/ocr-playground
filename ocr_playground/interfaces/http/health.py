@@ -22,19 +22,20 @@ MODE_COPY: dict[str, dict[str, object]] = {
         "cold_start": False,
         "detail": "CPU OCR on this server; a couple of seconds per page",
     },
-    # Measured cold starts after the weights are cached; the first boot of an app pays for its
-    # download on top, which is why the panel leads with the slower GLM figure.
+    # Per-page costs measured from the wrappers' own request durations. These differ by an order of
+    # magnitude, which is the point of showing them: a parser that takes a minute a page is a
+    # different choice from one that takes five seconds, and the comparison waits for the slowest.
     "chandra": {
         "cold_start": True,
-        "detail": "Chandra 2 on a scale-to-zero GPU; about a minute cold, returns layout markdown",
+        "detail": "Chandra 2 on a scale-to-zero GPU; the slowest here, about a minute a page",
     },
     "nemotron": {
         "cold_start": True,
-        "detail": "Nemotron 3.5 Parse on a scale-to-zero GPU; half a minute cold, markdown with tables",
+        "detail": "Nemotron 3.5 Parse on a scale-to-zero GPU; about 5 s a warm page, markdown with tables",
     },
     "unlimited": {
         "cold_start": True,
-        "detail": "Unlimited-OCR on a scale-to-zero GPU; about a minute cold, then ~30 s a page",
+        "detail": "Unlimited-OCR on a scale-to-zero GPU; about 45 s a page, crops and stitches long pages",
     },
 }
 
