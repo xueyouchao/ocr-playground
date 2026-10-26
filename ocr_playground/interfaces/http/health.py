@@ -22,17 +22,19 @@ MODE_COPY: dict[str, dict[str, object]] = {
         "cold_start": False,
         "detail": "CPU OCR on this server; a couple of seconds per page",
     },
+    # Measured cold starts after the weights are cached; the first boot of an app pays for its
+    # download on top, which is why the panel leads with the slower GLM figure.
     "chandra": {
         "cold_start": True,
-        "detail": f"Chandra 2 on a {_GPU_COLD}; returns layout markdown",
+        "detail": "Chandra 2 on a scale-to-zero GPU; about a minute cold, returns layout markdown",
     },
     "nemotron": {
         "cold_start": True,
-        "detail": f"Nemotron 3.5 Parse on a {_GPU_COLD}; returns markdown with tables",
+        "detail": "Nemotron 3.5 Parse on a scale-to-zero GPU; half a minute cold, markdown with tables",
     },
     "unlimited": {
         "cold_start": True,
-        "detail": f"Unlimited-OCR on a {_GPU_COLD}; crops and stitches long pages",
+        "detail": "Unlimited-OCR on a scale-to-zero GPU; about a minute cold, then ~30 s a page",
     },
 }
 
