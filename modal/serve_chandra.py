@@ -71,7 +71,10 @@ def web():
                          for part in message["content"] if part["type"] == "image_url")
         picture = Image.open(io.BytesIO(base64.b64decode(image_url.split(",", 1)[1]))).convert("RGB")
         result = generate_hf([BatchInputItem(image=picture, prompt_type="ocr_layout")], _state["model"])[0]
-        text = result.raw  # GenerationResult carries raw/html/markdown; raw is the model output
+        # GenerationResult carries raw/html/markdown. `raw` is the model's own stream — HTML with
+        # data-bbox wrappers per region — which a text cell renders as literal markup; `markdown` is
+        # the same layout in the form the page shows, so it wins when the package provides it.
+        text = getattr(result, "markdown", "") or result.raw
         return {"choices": [{"message": {"role": "assistant", "content": text}}]}
 
     return api

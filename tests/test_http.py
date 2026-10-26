@@ -426,3 +426,26 @@ def test_each_mode_names_its_own_engine_when_unconfigured(api):
         assert status == 503, mode
         assert name in json.loads(body)["error"]
         assert "fast option" in json.loads(body)["error"]
+
+
+def test_a_chunked_upload_is_refused_without_poisoning_the_connection(api):
+    """No Content-Length can still mean bytes are coming; the refusal must close, not assume empty."""
+    base, _ = api(glm_base_url="http://stub/v1")
+    parts = urllib.parse.urlsplit(base)
+    connection = http.client.HTTPConnection(parts.hostname, parts.port, timeout=10)
+    try:
+        connection.putrequest("POST", "/api/parse")
+        connection.putheader("Content-Type", "application/pdf")
+        connection.putheader("Transfer-Encoding", "chunked")
+        connection.endheaders()
+        connection.send(b"5\r\n%PDF-\r\n0\r\n\r\n")
+        refused = connection.getresponse()
+        refused.read()
+        connection.request("GET", "/api/health")
+        after = connection.getresponse()
+        after.read()
+    finally:
+        connection.close()
+
+    assert refused.status == 411, refused.status
+    assert after.status == 200

@@ -188,7 +188,9 @@ class Handler(BaseHTTPRequestHandler):
             length = 0
         settings = self.container.settings()
         if length <= 0:
-            self._body_read = True
+            # No Content-Length is not necessarily no body: a chunked upload lands here with its
+            # chunks still in the socket, so this rejection closes the connection rather than
+            # leaving them to be parsed as the next request.
             self._json(HTTPStatus.LENGTH_REQUIRED, {"error": "send the file as the request body"})
             return
         if length > settings.max_upload_bytes:
