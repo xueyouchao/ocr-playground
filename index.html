@@ -294,6 +294,8 @@ function withImagePlaceholders(html) {
 // the Markdown between those blocks is converted.
 const HTML_BLOCK = /<(table|figure|div|p|ul|ol|h[1-6]|blockquote|pre)\b[\s\S]*?<\/\1>|<img\b[^>]*>/gi;
 
+const HTML_OPEN = /<(table|figure|div|p|ul|ol|h[1-6]|blockquote|pre)\b/i;
+
 function mixedToHtml(text) {
   let html = "";
   let cursor = 0;
@@ -303,7 +305,14 @@ function mixedToHtml(text) {
     html += withImagePlaceholders(match[0]);
     cursor = match.index + match[0].length;
   }
-  return html + markdownToHtml(text.slice(cursor));
+  // A cell can end mid-element: Chandra stops at max_tokens with an unclosed <table>, so its 21k
+  // characters match no block. Escaping that tail would show markup instead of the table it drew.
+  const tail = text.slice(cursor);
+  const unclosed = tail.search(HTML_OPEN);
+  if (unclosed >= 0) {
+    return html + markdownToHtml(tail.slice(0, unclosed)) + withImagePlaceholders(tail.slice(unclosed));
+  }
+  return html + markdownToHtml(tail);
 }
 
 function isHtmlDocument(text) {

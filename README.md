@@ -130,6 +130,11 @@ build.py                 template.html + evidence.json -> index.html
 template.html            the page: source rail, eight panes, text/preview per pane
 ```
 
+## Further reading
+
+[`WRITEUP.md`](WRITEUP.md) is the longer story: what the artifacts are, how the build is wired, what
+the runs showed, and the trade-offs behind the decisions. This README stays the setup guide.
+
 ## Credits
 
 Parsers belong to their projects: [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR),

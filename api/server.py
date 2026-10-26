@@ -197,17 +197,21 @@ class Handler(BaseHTTPRequestHandler):
         if not _SLOTS.acquire(timeout=30):
             self._json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "busy, try again in a moment"})
             return
+        # One try/finally around the read *and* the parse. Releasing per branch leaked the slot
+        # whenever the read raised something other than TimeoutError -- ConnectionResetError most
+        # often -- and two such failures left every later upload answering "busy" until a restart.
         try:
-            payload = self.rfile.read(length)
-        except TimeoutError:
-            _SLOTS.release()
-            self._json(HTTPStatus.REQUEST_TIMEOUT, {"error": "the upload stalled; send it again"})
-            return
-        if len(payload) != length:
-            _SLOTS.release()
-            self._json(HTTPStatus.REQUEST_TIMEOUT, {"error": "the upload ended early; send it again"})
-            return
-        try:
+            try:
+                payload = self.rfile.read(length)
+            except TimeoutError:
+                self._json(HTTPStatus.REQUEST_TIMEOUT, {"error": "the upload stalled; send it again"})
+                return
+            except OSError:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": "the upload was cut off; send it again"})
+                return
+            if len(payload) != length:
+                self._json(HTTPStatus.REQUEST_TIMEOUT, {"error": "the upload ended early; send it again"})
+                return
             document = parse_document(payload, media_type, name)
         except ValueError as error:
             self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
