@@ -18,8 +18,8 @@ table cell.
 You can also **read your own document**: a PDF of up to five pages, or a single image (PNG, JPEG,
 TIFF, WebP), shown in the same layout. **GLM-OCR** is the default — it reads handwriting and tables
 best, but it runs on a scale-to-zero GPU, so the first upload after idle takes about three minutes
-while the model boots — after that, uploads in the next couple of minutes are warm and take about
-five seconds a page. **LiteParse + Tesseract** is the fast option: a couple of seconds per page on
+while the model boots — it then stays warm for two minutes after the last request, so another
+upload inside that window takes about five seconds a page. **LiteParse + Tesseract** is the fast option: a couple of seconds per page on
 the server's CPU, and visibly weaker on handwriting. Nothing is stored.
 
 The bundled document is
