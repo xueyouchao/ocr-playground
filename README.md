@@ -84,10 +84,16 @@ for its own weights once.
 image.
 
 `GET /api/health` reports which modes this server can run — `glm`, `fast`, `chandra`, `nemotron`,
-`unlimited`, each with its name, availability and cold-start note, which is what the page's dropdown
+`unlimited`, each with its name, availability and cold-start note, which is what the page's picker
 is built from. `POST /api/parse` takes the file as the body and `X-Mode: glm|fast|chandra|nemotron|
-unlimited` (or `?mode=`); with neither, it uses GLM-OCR. Every GPU path is cold after idle, so its
-first read takes about three minutes; that is the trade the dropdown is there to explain.
+unlimited` (or `?mode=`); with neither, it uses GLM-OCR.
+
+A comma-separated list asks for a comparison: `X-Mode: chandra,nemotron` reads the same rendered
+pages with both, concurrently, and the response carries one system and one cell per engine. An
+engine that fails does not sink the comparison — its cells carry the reason and the others are
+still rendered — and the request only fails if no engine produced a reading. Each selected parser
+is its own endpoint, so a comparison costs the same GPU-minutes as running them one at a time and
+takes the time of the slowest.
 
 `POST /api/warm` starts that cold GPU before an upload needs it. The page sends it when somebody
 picks GLM or reaches for the uploader, so the boot overlaps with the seconds they spend choosing a

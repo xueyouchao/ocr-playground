@@ -3,7 +3,14 @@
 Importing from `ocr_playground.domain` is the short form for the names an interface actually needs;
 anything more specific belongs in its own module.
 """
-from .document import DocumentPage, PageImage, PageLimit, ReadDocument, SourceDocument
+from .document import (
+    DocumentPage,
+    PageFailure,
+    PageImage,
+    PageLimit,
+    ReadDocument,
+    SourceDocument,
+)
 from .engine import EngineRegistry, EngineSpec
 from .errors import (
     DomainError,
@@ -26,6 +33,7 @@ __all__ = [
     "EngineRegistry",
     "EngineSpec",
     "MediaType",
+    "PageFailure",
     "PageImage",
     "PageLimit",
     "PageLimitExceeded",

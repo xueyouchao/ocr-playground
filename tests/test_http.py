@@ -8,11 +8,13 @@ from __future__ import annotations
 import http.client
 import json
 import socket
+import tempfile
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -449,3 +451,28 @@ def test_a_chunked_upload_is_refused_without_poisoning_the_connection(api):
 
     assert refused.status == 411, refused.status
     assert after.status == 200
+
+
+def test_a_comma_separated_mode_returns_a_comparison(api):
+    """One upload, several engines: the response carries a system and a cell for each."""
+    base, _ = api(rig=build_rig(Path(tempfile.mkdtemp()), pages=1))
+    status, _, body = call(base, "/api/parse", method="POST", body=b"%PDF", headers={
+        "Content-Type": "application/pdf", "X-Mode": "glm,fast", "X-Filename": "x.pdf",
+    })
+
+    assert status == 200
+    evidence = payload(body)
+    assert [system["id"] for system in evidence["systems"]] == ["glm-ocr", "liteparse-tesseract"]
+    assert set(evidence["pages"][0]["cells"]) == {"glm-ocr", "liteparse-tesseract"}
+    assert evidence["document"]["note"] == (
+        "uploaded just now · read side by side by GLM-OCR + LiteParse + Tesseract"
+    )
+
+
+def test_a_comparison_with_one_unconfigured_engine_is_refused(api):
+    base, _ = api(glm_base_url="http://stub/v1")  # chandra has no endpoint here
+    status, _, body = call(base, "/api/parse", method="POST", body=b"%PDF", headers={
+        "Content-Type": "application/pdf", "X-Mode": "glm,chandra", "X-Filename": "x.pdf",
+    })
+    assert status == 503
+    assert "Chandra OCR 2" in payload(body)["error"]

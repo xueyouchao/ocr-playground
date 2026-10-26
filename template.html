@@ -40,13 +40,16 @@
   .uploader button.ghost { background: #fff; color: var(--accent); border-color: var(--line); }
   .uploader button:disabled { opacity: .5; cursor: default; }
   .modes { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
-  .modes label { font: 600 10.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase;
+  .modes-label { font: 600 10.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase;
                  color: var(--soft); }
-  .modes select { font: 600 11.5px/1.3 var(--mono); padding: 7px 10px; border-radius: 7px;
-                  border: 1px solid var(--line); background: #fff; color: var(--ink);
-                  max-width: 22ch; cursor: pointer; }
-  .modes select:disabled { opacity: .5; cursor: default; }
-  .modes select option:disabled { color: var(--soft); }
+  .checks { display: flex; gap: 6px; flex-wrap: wrap; }
+  .checks label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+                  font: 600 11.5px/1.3 var(--mono); padding: 6px 10px; border-radius: 7px;
+                  border: 1px solid var(--line); background: #fff; color: var(--soft); }
+  .checks label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft);
+                                     color: var(--accent); }
+  .checks label:has(input:disabled) { opacity: .5; cursor: default; }
+  .checks input { accent-color: var(--accent); margin: 0; }
   .modes small { flex-basis: 100%; font: 10.5px/1.4 var(--mono); color: var(--soft); min-height: 1.4em; }
   .upload-status { grid-column: 1 / -1; margin: 0; font: 12px var(--mono); color: var(--soft); min-height: 1em; }
   .upload-status.error { color: var(--bad); }
@@ -147,11 +150,11 @@
       about 5 seconds a page</b>. <b>LiteParse + Tesseract</b> is the fast option — a couple of seconds per
       page on this server's CPU — and visibly weaker on handwriting.</span>
     <div class="modes" id="modes">
-      <label for="mode">read it with</label>
-      <select id="mode" aria-label="extraction method">
-        <option value="glm">GLM-OCR</option>
-        <option value="fast">LiteParse + Tesseract</option>
-      </select>
+      <span class="modes-label" id="modes-label">read it with</span>
+      <div class="checks" id="mode-checks" role="group" aria-labelledby="modes-label">
+        <label><input type="checkbox" value="glm" checked><span>GLM-OCR</span></label>
+        <label><input type="checkbox" value="fast"><span>LiteParse + Tesseract</span></label>
+      </div>
       <small id="mode-detail" aria-live="polite"></small>
     </div>
   </div>
@@ -199,7 +202,7 @@
 
 <script>
 const DATA = __EVIDENCE__;
-const state = { page: 1, view: {}, allPreview: true, uploaded: null, mode: "glm", find: {} };
+const state = { page: 1, view: {}, allPreview: true, uploaded: null, modes: ["glm"], find: {} };
 // The renderers do not care whether the document is the bundled sample or a fresh upload: both
 // arrive in the same shape, so this is the only branch in the page.
 const currentDoc = () => state.uploaded || DATA;
@@ -689,13 +692,13 @@ function renderStrip() {
 function paneContent(system, cell, view, find) {
   const searchable = cell.chars != null && cell.text.trim().length > 0;
   if (cell.chars == null) {
-    return {
-      html: system.runner
+    // A comparison records why an engine did not answer; a recorded run just has no output.
+    const html = cell.error
+      ? `<div class="none">Did not read this page — ${escapeHtml(cell.error)}</div>`
+      : system.runner
         ? `<div class="none">No output recorded. Run <code>${escapeHtml(system.runner)}</code>.</div>`
-        : `<div class="none">No output recorded for this page.</div>`,
-      matches: 0,
-      searchable,
-    };
+        : `<div class="none">No output recorded for this page.</div>`;
+    return { html, matches: 0, searchable };
   }
   if (!cell.text.trim()) {
     return { html: `<div class="none">Produced no text for this page.</div>`, matches: 0, searchable };
@@ -834,9 +837,10 @@ function setFind(systemId, query) {
 function renderFooter() {
   const doc = currentDoc();
   if (state.uploaded) {
-    const system = doc.systems[0];
+    const names = doc.systems.map((system) => system.name).join(" + ");
+    const where = doc.systems.length === 1 ? ` (${doc.systems[0].device})` : "";
     $("footer").textContent = `Your upload, ${doc.pages.length} page${doc.pages.length === 1 ? "" : "s"} · `
-      + `read live by ${system.name} (${system.device}) · nothing is stored.`;
+      + `read live by ${names}${where} · nothing is stored.`;
   } else {
     $("footer").textContent = `${doc.systems.length} parsers on ${doc.pages.length} pages · recorded from each project's own CLI/API on a 4-core CPU box `
       + `(200 dpi page renders) and Modal L4 GPUs · runs are in records/, provenance in systems.json.`;
@@ -914,36 +918,42 @@ function uploadStatus(message, isError) {
   line.classList.toggle("error", Boolean(isError));
 }
 
-// The picker is a dropdown because the server can now run several VLM parsers, each on its own
-// GPU. The list is built from /api/health, so a parser the host has no endpoint for shows up
-// labelled and unselectable rather than failing an upload.
+// The picker is a checkbox group because the server can read the same document with several
+// parsers at once and return them side by side. The list comes from /api/health, so a parser this
+// host has no endpoint for appears labelled and unselectable rather than failing an upload.
 const MODE_AVAILABLE = { glm: true, fast: true };
 const MODE_COLD = { glm: true, fast: false };
 const MODE_NAME = { glm: "GLM-OCR", fast: "LiteParse + Tesseract" };
 const MODE_DETAIL = {};
 
-function modeSelect() {
-  return $("mode");
+function modeBoxes() {
+  return [...$("mode-checks").querySelectorAll("input[type=checkbox]")];
 }
 
 // A read that is already running owns the picker: /api/health can resolve after the request went
-// out, and re-enabling the control then would only mislabel a request that has already been sent.
+// out, and re-enabling the boxes then would only mislabel a request that has already been sent.
 let uploadBusy = false;
 // Once the visitor has picked a parser, /api/health must not replace that pick.
 let userChoseMode = false;
 
-function applyModes() {
-  const select = modeSelect();
-  select.value = state.mode;
-  for (const option of select.options) {
-    option.disabled = uploadBusy || !MODE_AVAILABLE[option.value];
-  }
-  select.disabled = uploadBusy;
-  $("mode-detail").textContent = MODE_DETAIL[state.mode] || "";
+function primaryMode() {
+  return state.modes[0] || "glm";
 }
 
-function modeNote(mode = state.mode) {
-  return MODE_DETAIL[mode] || "";
+function applyModes() {
+  for (const box of modeBoxes()) {
+    box.checked = state.modes.includes(box.value);
+    box.disabled = uploadBusy || !MODE_AVAILABLE[box.value];
+  }
+  $("mode-detail").textContent = modeNote(state.modes);
+}
+
+function modeNote(modes = state.modes) {
+  if (!modes.length) return "";
+  if (modes.length === 1) return MODE_DETAIL[modes[0]] || "";
+  const cold = modes.filter((mode) => MODE_COLD[mode]).length;
+  return `${modes.length} parsers on the same pages, side by side`
+    + (cold ? ` · ${cold} cold start${cold === 1 ? "" : "s"} to pay` : "");
 }
 
 function setUploadBusy(busy) {
@@ -953,46 +963,46 @@ function setUploadBusy(busy) {
   applyModes();
 }
 
-// The server is the only thing that knows which endpoints this host has. Ask once on load: parse
-// every mode it reports, default to the one it names when that one can run, and explain a fallback
-// instead of failing the first upload.
+// The server is the only thing that knows which endpoints this host has. Ask once on load: build a
+// box per mode it reports, check the one it defaults to when that one can run, and explain a
+// fallback instead of failing the first upload.
 async function loadModes() {
   try {
     const response = await fetch("/api/health");
     if (!response.ok) return;
     const health = await response.json();
-    const select = modeSelect();
-    select.innerHTML = "";
+    const group = $("mode-checks");
+    group.innerHTML = "";
     for (const mode of health.modes || []) {
       MODE_AVAILABLE[mode.id] = mode.available !== false;
       MODE_COLD[mode.id] = mode.cold_start === true;
       MODE_NAME[mode.id] = mode.name;
       MODE_DETAIL[mode.id] = mode.detail || "";
-      const option = document.createElement("option");
-      option.value = mode.id;
-      option.textContent = mode.available === false ? `${mode.name} — not configured` : mode.name;
-      select.append(option);
+      const label = document.createElement("label");
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.value = mode.id;
+      const name = document.createElement("span");
+      name.textContent = mode.available === false ? `${mode.name} — not configured` : mode.name;
+      label.append(box, name);
+      group.append(label);
     }
     // The server's default only applies to a visitor who has not chosen yet: honouring it later
     // would quietly undo a pick made while this request was in flight.
     if (!userChoseMode && MODE_AVAILABLE[health.default_mode]) {
-      state.mode = health.default_mode;
-    } else if (!MODE_AVAILABLE[state.mode]) {
-      // Pick by what this host can run, not by what is enabled in the DOM — every option is still
-      // enabled until applyModes() runs, so reading the DOM here would select the unavailable one.
-      const fallback = (health.modes || []).find((mode) => MODE_AVAILABLE[mode.id]);
-      state.mode = fallback ? fallback.id : state.mode;
-      // Do not talk over a read that is already running; its status describes the request it sent.
-      if (!uploadBusy) {
-        uploadStatus(`${MODE_NAME[health.default_mode] || "The default parser"} is not configured on `
-          + `this server; using ${MODE_NAME[state.mode] || state.mode}.`);
-      }
+      state.modes = [health.default_mode];
     }
-    // A server whose modes do not include the markup's default would leave the dropdown blank and
-    // the upload with no mode at all; settle on something this host can actually run.
-    if (![...select.options].some((option) => option.value === state.mode)) {
-      const first = [...select.options].find((option) => MODE_AVAILABLE[option.value]);
-      if (first) state.mode = first.value;
+    // Never leave the picker empty or pointing at a parser this host cannot run — the upload would
+    // then send a mode that cannot answer. Filter on MODE_AVAILABLE, not the DOM, which is stale
+    // here: applyModes() has not run yet.
+    state.modes = state.modes.filter((mode) => MODE_AVAILABLE[mode]);
+    if (!state.modes.length) {
+      const fallback = (health.modes || []).find((mode) => MODE_AVAILABLE[mode.id]);
+      if (fallback) state.modes = [fallback.id];
+      if (!MODE_AVAILABLE[health.default_mode] && !uploadBusy) {
+        uploadStatus(`${MODE_NAME[health.default_mode] || "The default parser"} is not configured on `
+          + `this server; using ${MODE_NAME[primaryMode()] || primaryMode()}.`);
+      }
     }
     applyModes();
   } catch {
@@ -1001,43 +1011,50 @@ async function loadModes() {
 }
 
 // A VLM parser's container bills GPU time from boot until it scales down, so this fires on intent —
-// the dropdown choosing that parser, or a pointer or keyboard landing on the uploader — never on
-// page load alone, and never for the CPU path. The server throttles it to one boot per interval and
-// caps the day on top of that; the cooldown here only stops a pointer wandering around the panel
-// from asking twice. It is a cooldown, not a flag, because a page that stays open outlives the GPU:
-// after it has scaled down, the next interaction should be allowed to warm it again.
+// a box being ticked, or a pointer or keyboard landing on the uploader — never on page load alone,
+// and never for the CPU path. Every cold parser that was ticked is pinged; the server throttles them
+// to one boot per interval and caps the day, so the extras wait for their turn.
 const WARM_COOLDOWN_MS = 60000;
-let warmedAt = 0;
+const warmedAt = {};
 
 function warmGpu() {
-  if (!MODE_COLD[state.mode] || !MODE_AVAILABLE[state.mode]) return;
-  if (Date.now() - warmedAt < WARM_COOLDOWN_MS) return;
-  warmedAt = Date.now();
-  const mode = state.mode;
-  // A failed ping clears the cooldown: the GPU may still be cold, so the next interaction tries.
-  fetch(WARM_API, { method: "POST", headers: { "X-Mode": mode } }).catch(() => {
-    warmedAt = 0;
-  });
+  for (const mode of state.modes) {
+    if (!MODE_COLD[mode] || !MODE_AVAILABLE[mode]) continue;
+    if (Date.now() - (warmedAt[mode] || 0) < WARM_COOLDOWN_MS) continue;
+    warmedAt[mode] = Date.now();
+    // A failed ping clears the cooldown: the GPU may still be cold, so the next interaction tries.
+    fetch(WARM_API, { method: "POST", headers: { "X-Mode": mode } }).catch(() => {
+      warmedAt[mode] = 0;
+    });
+  }
 }
 
 $("uploader").addEventListener("pointerenter", warmGpu);
 $("uploader").addEventListener("focusin", warmGpu);
 
-$("mode").addEventListener("change", () => {
-  state.mode = modeSelect().value;
+$("mode-checks").addEventListener("change", (event) => {
+  const box = event.target.closest("input[type=checkbox]");
+  if (!box) return;
+  const chosen = modeBoxes().filter((one) => one.checked).map((one) => one.value);
+  if (!chosen.length) {
+    // At least one parser has to stay checked: an empty picker is an upload with nothing to read.
+    box.checked = true;
+    return;
+  }
+  state.modes = chosen;
   userChoseMode = true;
   applyModes();
   warmGpu();
-  uploadStatus(modeNote(state.mode));
+  uploadStatus(modeNote(state.modes));
 });
 
 async function readUpload(file) {
-  const mode = state.mode;
+  // The request's own parsers, not the picker's: the picker is disabled, but health may still land.
+  const modes = state.modes.slice();
   setUploadBusy(true);
   const started = Date.now();
   const ticker = setInterval(() => {
-    // The request's own mode, not the picker's: the picker is disabled, but health may still land.
-    uploadStatus(`reading ${file.name}… ${Math.round((Date.now() - started) / 1000)}s · ${modeNote(mode)}`);
+    uploadStatus(`reading ${file.name}… ${Math.round((Date.now() - started) / 1000)}s · ${modeNote(modes)}`);
   }, 1000);
   uploadStatus(`reading ${file.name}…`);
   try {
@@ -1046,7 +1063,7 @@ async function readUpload(file) {
       headers: {
         "Content-Type": file.type || "application/octet-stream",
         "X-Filename": encodeURIComponent(file.name),
-        "X-Mode": mode,
+        "X-Mode": modes.join(","),
       },
       body: file,
     });
@@ -1060,11 +1077,19 @@ async function readUpload(file) {
     state.allPreview = true;
     $("back-to-sample").hidden = false;
     const seconds = ((Date.now() - started) / 1000).toFixed(1);
+    const names = body.systems.map((system) => system.name).join(" + ");
+    // An engine that did not answer still occupies a pane; say so here rather than after the scroll.
+    const silent = body.systems.filter(
+      (system) => body.pages[0].cells[system.id].chars == null,
+    ).length;
     uploadStatus(`${file.name} · ${body.document.pages} page${body.document.pages === 1 ? "" : "s"} `
-      + `read in ${seconds}s by ${body.systems[0].name}`);
+      + `read in ${seconds}s by ${names}`
+      + (silent ? ` · ${silent} could not read it` : ""));
     render();
   } catch (error) {
-    const hint = mode === "glm" ? " — or switch to LiteParse + Tesseract, the fast option." : "";
+    const hint = modes.includes("glm")
+      ? " — or tick LiteParse + Tesseract, the fast option."
+      : "";
     uploadStatus(`could not read that file — ${error.message}${hint}`, true);
   } finally {
     clearInterval(ticker);

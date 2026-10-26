@@ -11,6 +11,7 @@ from fakes import build_rig
 from ocr_playground.application.errors import EngineFailure, EngineTimeout, EngineUnavailable
 from ocr_playground.domain.document import PageLimit, SourceDocument
 from ocr_playground.domain.errors import UnknownMode
+from ocr_playground.interfaces.evidence import document_evidence
 
 
 def source(png_bytes: bytes, name: str = "form.png") -> SourceDocument:
@@ -137,3 +138,87 @@ def test_the_service_refuses_engines_that_do_not_match_the_registry(tmp_path) ->
             budget_seconds=1,
             max_pages=5,
         )
+
+
+def test_a_comparison_reads_the_same_pages_with_every_engine(tmp_path, png_bytes) -> None:
+    rig = build_rig(tmp_path, pages=2)
+    document = rig.service.execute(source(png_bytes), "glm,fast")
+
+    assert [engine.id for engine in document.engines] == [
+        "glm-ocr", "liteparse-tesseract",
+    ]
+    assert document.engine.id == "glm-ocr", "the first engine asked for is the primary"
+    assert document.note == "read side by side by GLM-OCR + LiteParse + Tesseract"
+    for page in document.pages:
+        assert {reading.engine_id for reading in page.readings} == {
+            "glm-ocr", "liteparse-tesseract",
+        }
+    assert rig.glm.reads and rig.fast.reads, "both engines read, not just the primary"
+
+
+def test_the_engines_run_concurrently_rather_than_one_after_another(tmp_path, png_bytes) -> None:
+    """Each engine is its own endpoint, so overlapping them costs the same and waits once."""
+    import threading
+
+    rig = build_rig(tmp_path, pages=1)
+    both_running = threading.Barrier(2, timeout=5)
+    entered: list[str] = []
+
+    def rendezvous(name: str, text: str) -> None:
+        entered.append(name)
+        both_running.wait()  # only releases if the other engine is inside read() too
+        return text
+
+    rig.glm._text = lambda page: rendezvous("glm", f"glm page {page}")
+    rig.fast._text = lambda page: rendezvous("fast", f"fast page {page}")
+
+    document = rig.service.execute(source(png_bytes), "glm,fast")
+    assert sorted(entered) == ["fast", "glm"]
+    assert {reading.engine_id for reading in document.pages[0].readings} == {
+        "glm-ocr", "liteparse-tesseract",
+    }
+
+
+def test_one_engine_failing_leaves_the_comparison_standing(tmp_path, png_bytes) -> None:
+    rig = build_rig(tmp_path, pages=2, fast_error=EngineTimeout("the endpoint did not answer"))
+    document = rig.service.execute(source(png_bytes), "glm,fast")
+
+    assert [engine.id for engine in document.engines] == ["glm-ocr", "liteparse-tesseract"]
+    for page in document.pages:
+        assert page.reading_by("glm-ocr") is not None
+        assert page.reading_by("liteparse-tesseract") is None
+        assert page.failure_for("liteparse-tesseract") == "the endpoint did not answer"
+
+    evidence = document_evidence(document)
+    cells = evidence["pages"][0]["cells"]
+    assert cells["glm-ocr"]["chars"] > 0
+    assert cells["liteparse-tesseract"]["chars"] is None
+    assert cells["liteparse-tesseract"]["error"] == "the endpoint did not answer"
+    assert [system["id"] for system in evidence["systems"]] == ["glm-ocr", "liteparse-tesseract"]
+
+
+def test_a_document_that_no_engine_could_read_is_an_error(tmp_path, png_bytes) -> None:
+    rig = build_rig(
+        tmp_path, glm_error=EngineTimeout("glm timed out"), fast_error=EngineFailure("fast broke"),
+    )
+    with pytest.raises(EngineTimeout):
+        rig.service.execute(source(png_bytes), "glm,fast")
+
+
+def test_a_failed_engine_is_not_retried_on_every_page(tmp_path, png_bytes) -> None:
+    rig = build_rig(tmp_path, pages=3, fast_error=EngineFailure("fast broke"))
+    rig.service.execute(source(png_bytes), "glm,fast")
+    assert len(rig.fast.reads) == 1, "one failure, not one per page"
+
+
+def test_a_comparison_resolves_every_engine_before_reading(tmp_path, png_bytes) -> None:
+    rig = build_rig(tmp_path, fast_available=False)
+    with pytest.raises(EngineUnavailable):
+        rig.service.execute(source(png_bytes), "glm,fast")
+    assert not rig.glm.reads, "nothing is read when one engine in the list cannot run"
+
+
+def test_a_mode_list_is_deduplicated_and_order_preserved(tmp_path, png_bytes) -> None:
+    rig = build_rig(tmp_path, pages=1)
+    document = rig.service.execute(source(png_bytes), " fast , glm , fast ")
+    assert [engine.id for engine in document.engines] == ["liteparse-tesseract", "glm-ocr"]

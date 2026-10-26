@@ -22,6 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
 
 from ...application.capacity import SlotsBusy
+from ...application.read_document import reading_note
 from ...application.errors import EngineFailure, EngineTimeout, EngineUnavailable
 from ...composition.container import Container, build_container
 from ...domain.document import SourceDocument
@@ -111,7 +112,10 @@ class Handler(BaseHTTPRequestHandler):
     def requested_mode(self) -> str:
         """`?mode=fast` or `X-Mode: fast`; GLM-OCR when neither says otherwise.
 
-        The mode is resolved through the engine registry, so an unknown mode and an unconfigured
+        A comma-separated list (`glm,chandra`) asks for a comparison: the engines read the same
+        pages concurrently and the response carries one system per engine.
+
+        The modes are resolved through the engine registry, so an unknown mode and an unconfigured
         engine are rejected with their own errors rather than a shared 400.
         """
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
@@ -119,9 +123,10 @@ class Handler(BaseHTTPRequestHandler):
             query.get("mode")
             or [self.headers.get("X-Mode") or self.container.settings().default_mode]
         )[0]
-        mode = raw.strip().lower()
-        self.container.read_document().require_mode(mode)
-        return mode
+        modes = [part.strip().lower() for part in raw.split(",") if part.strip()]
+        for mode in modes:
+            self.container.read_document().require_mode(mode)
+        return ",".join(dict.fromkeys(modes))
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path.split("?")[0] == "/api/health":
@@ -229,11 +234,10 @@ class Handler(BaseHTTPRequestHandler):
                     return
 
                 service = self.container.read_document()
-                engine = service.require_mode(mode)
+                engines = [service.require_mode(part) for part in mode.split(",")]
                 document = service.execute(
-                    SourceDocument.accepted(payload, media_type, name),
-                    mode,
-                    note=f"uploaded just now · read by {engine.spec.name}",
+                    SourceDocument.accepted(payload, media_type, name), mode,
+                    note=f"uploaded just now · {reading_note(engines)}",
                 )
                 evidence = document_evidence(document)
         except SlotsBusy:
@@ -246,7 +250,8 @@ class Handler(BaseHTTPRequestHandler):
         # Cold starts are minutes long; one line per upload makes that visible in the service log.
         elapsed = time.monotonic() - started
         sys.stderr.write(
-            f"parsed {document.page_count} page(s) with {document.engine.id} in {elapsed:.1f}s\n"
+            f"parsed {document.page_count} page(s) with "
+            f"{', '.join(engine.id for engine in document.engines)} in {elapsed:.1f}s\n"
         )
         self._json(HTTPStatus.OK, evidence)
 

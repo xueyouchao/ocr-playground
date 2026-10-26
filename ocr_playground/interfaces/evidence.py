@@ -11,16 +11,28 @@ from ..domain.document import ReadDocument
 
 
 def document_evidence(document: ReadDocument) -> dict:
-    """One reading as the page renders it: document, systems, pages[].cells[engine]."""
-    engine_id = document.engine.id
+    """One reading as the page renders it: document, systems, pages[].cells[engine].
+
+    A comparison keeps one cell per system per page. An engine that did not answer still gets a
+    cell — with no counts and the reason — because the page draws one pane per system, and a missing
+    key would be a pane that cannot explain itself.
+    """
     pages = []
     for page in document.pages:
-        entry: dict = {
-            "page": page.number,
-            "cells": {
-                engine_id: {"text": page.reading.text, **page.reading.stats.as_dict()},
-            },
-        }
+        cells: dict = {}
+        for engine in document.engines:
+            reading = page.reading_by(engine.id)
+            if reading is None:
+                cells[engine.id] = {
+                    "text": "",
+                    "chars": None,
+                    "tokens": None,
+                    "numeric_share": None,
+                    "error": page.failure_for(engine.id) or "no output",
+                }
+            else:
+                cells[engine.id] = {"text": reading.text, **reading.stats.as_dict()}
+        entry: dict = {"page": page.number, "cells": cells}
         if page.preview is not None:
             entry["preview"] = page.preview
         pages.append(entry)
@@ -31,6 +43,6 @@ def document_evidence(document: ReadDocument) -> dict:
             "pages": document.page_count,
             "note": document.note,
         },
-        "systems": [document.engine.as_dict()],
+        "systems": [engine.as_dict() for engine in document.engines],
         "pages": pages,
     }
