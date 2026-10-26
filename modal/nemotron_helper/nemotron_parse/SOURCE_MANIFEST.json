@@ -1,0 +1,110 @@
+{
+  "repository": "nvidia/Nemotron-3.5-Parse",
+  "source_revision": "0fad7099302dc11313b7e3157eb8fd6ae633176e",
+  "extracted_components": [
+    {
+      "source": "reference/parsebench/pipeline/engine/__init__.py",
+      "source_sha256": "717a1b9838b948a88d2fb5106069db57dce81dc54854cf2be5fb54150c7ac652",
+      "destination": "nemotron_parse/engine/__init__.py"
+    },
+    {
+      "source": "reference/parsebench/pipeline/engine/caption_relocation.py",
+      "source_sha256": "3a17677b1a43c793cd817f8f3f5745be807203ff75b8e3e0af5a4d51d547dd4b",
+      "destination": "nemotron_parse/engine/caption_relocation.py"
+    },
+    {
+      "source": "reference/parsebench/pipeline/engine/chart_caption.py",
+      "source_sha256": "fe82e0eca23be96d7cc2199657432bd2ddf464313d41fed3984bf5960fddb0e6",
+      "destination": "nemotron_parse/engine/chart_caption.py"
+    },
+    {
+      "source": "reference/parsebench/pipeline/engine/chart_context.py",
+      "source_sha256": "ffe3393bc13bd54b9b65235ca51a4c15a0b40fe6404a5897379eb0dd2748d868",
+      "destination": "nemotron_parse/engine/chart_context.py"
+    },
+    {
+      "source": "reference/parsebench/pipeline/engine/convert/__init__.py",
+      "source_sha256": "717a1b9838b948a88d2fb5106069db57dce81dc54854cf2be5fb54150c7ac652",
+      "destination": "nemotron_parse/engine/convert/__init__.py"
+    },
+    {
+      "source": "reference/parsebench/pipeline/engine/convert/hybrid_cleanup.py",
+      "source_sha256": "f2f319de9bdabcfc5e264cdef6ff9d13235c488a372e9f58f676017f28f7c5c0",
+      "destination": "nemotron_parse/engine/convert/hybrid_cleanup.py"
+    },
+    {
+      "source": "reference/parsebench/pipeline/engine/convert/hybrid_inline.py",
+      "source_sha256": "0296f7827e74ae3ab64e9c9efbd496f096f0a3bbde7c3ad64d017539f1db7cb6",
+      "destination": "nemotron_parse/engine/convert/hybrid_inline.py"
+    },
+    {
+      "source": "reference/parsebench/pipeline/engine/convert/latex2html.py",
+      "source_sha256": "d583b5fa7fdbe181b190d2c8c22034318a51ef25d47203f9c7504bf35b508a72",
+      "destination": "nemotron_parse/engine/convert/latex2html.py"
+    },
+    {
+      "source": "reference/parsebench/pipeline/engine/convert/rich_table_fallback.py",
+      "source_sha256": "c2abbc602b293bf14a499f680de9f7d1584fdcf1438a374e3c75cf3705c0b793",
+      "destination": "nemotron_parse/engine/convert/rich_table_fallback.py"
+    },
+    {
+      "source": "reference/parsebench/pipeline/engine/convert/rich_table_reader.py",
+      "source_sha256": "8a8b615681d3adcb46c5290ad631abffeccb2af0ee18f25e82f0cdb70f5befac",
+      "destination": "nemotron_parse/engine/convert/rich_table_reader.py"
+    },
+    {
+      "source": "reference/parsebench/pipeline/engine/convert/semantic_styles.py",
+      "source_sha256": "3d92146e6c713b9de67cb71e92fe254a1344d9054c3925a85cb778ec68c0d075",
+      "destination": "nemotron_parse/engine/convert/semantic_styles.py"
+    },
+    {
+      "source": "reference/parsebench/pipeline/engine/geometry.py",
+      "source_sha256": "76671df686b574a827205acb757eecf702e970470ffa15f81b3129cbcd95e242",
+      "destination": "nemotron_parse/engine/geometry.py"
+    },
+    {
+      "source": "reference/parsebench/pipeline/engine/header_inference_probe.py",
+      "source_sha256": "02950f1aec5e2dc88a96487bd9124c97e5ce2842fbcfc5264ac2d5f697865722",
+      "destination": "nemotron_parse/engine/header_inference_probe.py"
+    },
+    {
+      "source": "reference/parsebench/pipeline/engine/markdown.py",
+      "source_sha256": "fc57566255ac632b24825973d9533a13fd717dad4e38d096098bac33ecc79957",
+      "destination": "nemotron_parse/engine/markdown.py"
+    },
+    {
+      "source": "reference/parsebench/pipeline/engine/merge.py",
+      "source_sha256": "b1c2e749e8f772b716c5a8a2ebeba7348474eb9368b00d37f1c8987e26d24e4e",
+      "destination": "nemotron_parse/engine/merge.py"
+    },
+    {
+      "source": "reference/parsebench/pipeline/engine/policies.py",
+      "source_sha256": "4c1f78be4d8061e4224fb59c3dc5342dfc21d9d37826814ea3573f339777aebd",
+      "destination": "nemotron_parse/engine/policies.py"
+    },
+    {
+      "source": "reference/parsebench/pipeline/engine/regions.py",
+      "source_sha256": "33058eec02bb378050febc577a2d85de97d34083234a08a2a8fa9c4b8dc62239",
+      "destination": "nemotron_parse/engine/regions.py"
+    },
+    {
+      "source": "reference/parsebench/pipeline/engine/text_cleanup.py",
+      "source_sha256": "f02f472d7b3cb08eca5b11d3ecf80ee6ec0636857ade17fb4cd11c13f371c2e4",
+      "destination": "nemotron_parse/engine/text_cleanup.py"
+    }
+  ],
+  "adaptations": [
+    "No dataset, scorer, or reference-answer dependencies",
+    "Headerless flat exports preserve all rows; collision-free field names",
+    "Exact duplicate cleanup preserves whitespace differences",
+    "Malformed table fallback preserves source",
+    "Presentation heuristics configurable",
+    "Image-based inference wrappers and guarded crop merging",
+    "Code and Formula blocks retain literal table examples",
+    "Enable guarded chart presentation rules by default, retaining opt-outs",
+    "Prepared image batches, bounded pipelined concurrency, and staged comparisons",
+    "Explicit partial-output accounting and per-stage timing",
+    "Retain differing overlapping structural alternatives by default; guarded replacement remains an explicit option. Scheduler unchanged.",
+    "Add first-request-to-last-response inference wall timing, retaining dependent crop preparation gaps and separate total pipeline metrics."
+  ]
+}
