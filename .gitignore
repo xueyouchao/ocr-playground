@@ -2,6 +2,11 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv-index/
 /tmp/
+
+# the indexer's declared output and CocoIndex's memo database
+/out/
+/cocoindex.db
 
 # the page renders are rebuilt by prepare.py; the previews are small enough to keep

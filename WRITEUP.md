@@ -163,6 +163,14 @@ above, with one system. `GET /api/health` reports which modes this server can ac
 limits; the page reads it to disable GLM-OCR when the deployment has no endpoint, and to select the
 fast path rather than fail the first upload.
 
+**The same pipeline, indexed.** Reading lives in `pipeline.py`; the HTTP handler is a shell around it.
+`indexer/flow.py` is a CocoIndex app over the same functions: walk a directory, memoise each document
+on its content digest, mode and engine identity, and declare `out/documents/<path>.json`,
+`out/pages.jsonl` and `out/summary.json`. A second run with nothing changed reads nothing; editing one
+file, switching modes or changing the model re-reads exactly the documents that change affects. Across
+the six-page sample plus a PNG, the fast path read seven pages in 21.6 s, and a switch to GLM re-read
+one page after its 156.8 s cold start, producing the same 1,234 characters the upload path shows.
+
 **Why not all eight live?** The other GPU-class models need their own deployments and multi-minute
 cold starts, and the CPU PaddleOCR pipeline is too heavy to answer inside a request on a four-core
 box. Two paths cover the range the page is making a point about — a VLM that reads handwriting, and a
@@ -255,6 +263,10 @@ descriptive statistics — not a leaderboard.
   after idle waits minutes. Rather than hide that behind a spinner or silently fall back, the panel
   names both paths, states the trade, and lets the picker choose fast. A silent fallback would hand
   back a reading while claiming a model that never ran.
+- **CocoIndex for the batch path, not the request path.** Indexing a directory wants memoisation,
+  retraction of documents that disappeared, and a run that can be restarted; an upload wants an answer
+  inside one request. Both call the same `pipeline.py`, so the index cannot quietly read a document
+  with a different parser than the demo shows.
 - **Mixed-format cells are handled as mixtures.** Nemotron emits `##` headings around raw `<table>`
   blocks; Chandra emits whole HTML documents. Picking one format per cell mangles the other, so
   block-level HTML is preserved and the Markdown between blocks is converted.
@@ -289,6 +301,9 @@ collect.py               records + roster → evidence.json
 build.py                 template.html + evidence.json → index.html
 template.html            the page: rail, page strip, eight panes, upload panel
 api/server.py            the upload service: GLM-OCR by default, LiteParse + Tesseract for speed
+pipeline.py              the reading shared by that service and the indexer
+main.py                  CocoIndex entry point; indexer/flow.py walks a corpus and declares out/
+requirements-cocoindex.txt  the indexer's one optional dependency, pinned
 deploy/                  Traefik/nginx notes for this box and any plain host
 ```
 
@@ -297,6 +312,7 @@ make pages    # PDF → /tmp/ocr-playground/pages + assets/pages
 make site     # records/ → evidence.json → index.html
 make serve    # http://127.0.0.1:8080
 make api      # upload service on :8090
+make index    # read OCR_CORPUS into out/ incrementally (cocoindex)
 ```
 
 The full per-parser commands — including the Modal deploys and the endpoint runner — are in the

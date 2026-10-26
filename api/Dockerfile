@@ -8,7 +8,9 @@ RUN apt-get update \
 RUN pip install --no-cache-dir liteparse==2.17.0
 
 WORKDIR /app
-COPY server.py /app/api/server.py
+# Built from the repository root: the reading lives in pipeline.py, shared with the indexer.
+COPY pipeline.py /app/pipeline.py
+COPY api/server.py /app/api/server.py
 
 EXPOSE 8090
 CMD ["python", "api/server.py", "--host", "0.0.0.0", "--port", "8090"]
