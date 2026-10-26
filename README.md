@@ -15,6 +15,11 @@ pattern, and a run of spaces in the query matches any whitespace, so a phrase st
 break. In `preview` the rendered text is searched, so a phrase also crosses a `<br>`, a block edge, or a
 table cell.
 
+A **night theme** is a click away on the title line: it swaps the palette, remembers the choice, and
+follows the OS (which is what makes the page go dark at sunset) until you pick one yourself. The
+preview panes are separate documents, so they are re-rendered in the same palette — no white rectangles
+left glowing in the middle of a dark page, and find marks keep a readable text colour at night.
+
 You can also **read your own document**: a PDF of up to five pages, or a single image (PNG, JPEG,
 TIFF, WebP), shown in the same layout. **GLM-OCR** is the default — it reads handwriting and tables
 best, but it runs on a scale-to-zero GPU, so the first upload after idle takes about three minutes
@@ -71,22 +76,23 @@ GLM_OCR_BASE_URL=https://<glm-app>.modal.run/v1 \
 CHANDRA_OCR_BASE_URL=https://<chandra-app>.modal.run/v1 \
 NEMOTRON_PARSE_BASE_URL=https://<nemotron-app>.modal.run/v1 \
 UNLIMITED_OCR_BASE_URL=https://<unlimited-app>.modal.run/v1 \
+MINERU_BASE_URL=https://<mineru-app>.modal.run/v1 \
 make api
 make api                                      # no endpoint: fast (LiteParse + Tesseract) only
 ```
 
-The four GPU apps are `modal deploy modal/serve_{glm_ocr,chandra,nemotron,unlimited}.py`, one L4
-each, all scaled to zero when idle. They share one HF cache volume, so the first boot of each pays
-for its own weights once.
+The five GPU apps are `modal deploy modal/serve_{glm_ocr,chandra,nemotron,unlimited,mineru}.py`,
+one L4 each, all scaled to zero when idle. The four VLM wrappers share one HF cache volume, so the
+first boot of each pays for its own weights once; MinerU keeps its models in its own volume.
 
 `make test` runs the offline suite (no GPU, no LiteParse, no poppler). The fast path needs LiteParse
 (`pip install liteparse==2.17.0`, which provides the `lit` CLI) and Tesseract on the host or in the
 image.
 
 `GET /api/health` reports which modes this server can run — `glm`, `fast`, `chandra`, `nemotron`,
-`unlimited`, each with its name, availability and cold-start note, which is what the page's picker
+`unlimited`, `mineru`, each with its name, availability and cold-start note, which is what the page's picker
 is built from. `POST /api/parse` takes the file as the body and `X-Mode: glm|fast|chandra|nemotron|
-unlimited` (or `?mode=`); with neither, it uses GLM-OCR.
+unlimited|mineru` (or `?mode=`); with neither, it uses GLM-OCR.
 
 A comma-separated list asks for a comparison: `X-Mode: chandra,nemotron` reads the same rendered
 pages with both, concurrently, and the response carries one system and one cell per engine. An
