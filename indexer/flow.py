@@ -7,9 +7,10 @@ declares the results under `OCR_OUT`:
     pages.jsonl                     one row per page — the indexable corpus
     summary.json                    what this run declared, and what it could not read
 
-Reading is memoised on the content digest, the mode and the engine identity, so a second run with
-nothing changed reads nothing, and changing a file, a mode or the model re-reads exactly the documents
-that change affects. That is the whole reason to put this behind CocoIndex instead of a `for` loop.
+Reading is memoised on the content digest, the mode, the engine identity and the page limit, so a
+second run with nothing changed reads nothing, and changing a file, a mode, the model or the limit
+re-reads exactly the documents that change affects. That is the whole reason to put this behind
+CocoIndex instead of a `for` loop.
 """
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ from dataclasses import dataclass
 import cocoindex as coco
 from cocoindex.connectors import localfs
 
+import pipeline
 from pipeline import (
     GLM_BASE_URL,
     GLM_MODEL,
@@ -48,8 +50,12 @@ DB = pathlib.Path(os.environ.get("OCR_DB", "cocoindex.db"))
 # A run with no endpoint named stays on the free CPU path; naming glm without one is an error.
 MODE = os.environ.get("OCR_MODE", "").strip().lower() or ("glm" if GLM_BASE_URL else "fast")
 # 0 means every page: an index that silently dropped pages would be worse than a slow run.
-MAX_PAGES = int(os.environ.get("OCR_MAX_PAGES", "0")) or None
+MAX_PAGES = int(os.environ.get("OCR_MAX_PAGES", "0"))
 IDENTITY = ""
+
+# CocoIndex memoises this module's own AST, not the code it calls, so a change to pipeline.py would
+# otherwise serve text the old reader produced. The fingerprint makes the identity name the recipe too.
+PIPELINE_FINGERPRINT = hashlib.sha256(pathlib.Path(pipeline.__file__).read_bytes()).hexdigest()[:12]
 
 
 class ConfigError(RuntimeError):
@@ -67,10 +73,13 @@ def _version(command: list[str], fallback: str) -> str:
 def engine_identity(mode: str) -> str:
     """Names everything that changes what the reader emits, so the memo key can carry it."""
     if mode == "glm":
-        return f"glm-ocr model={GLM_MODEL} prompt={GLM_PROMPT!r} endpoint={GLM_BASE_URL}"
+        return (
+            f"glm-ocr model={GLM_MODEL} prompt={GLM_PROMPT!r} endpoint={GLM_BASE_URL} "
+            f"pipeline={PIPELINE_FINGERPRINT}"
+        )
     lit = _version([LIT, "--version"], "unknown")
     tesseract = _version(["tesseract", "--version"], "unknown")
-    return f"liteparse-tesseract lit={lit} tesseract={tesseract}"
+    return f"liteparse-tesseract lit={lit} tesseract={tesseract} pipeline={PIPELINE_FINGERPRINT}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,17 +103,18 @@ def coco_lifespan(builder: coco.EnvironmentBuilder):
 
 
 @coco.fn(memo=True)
-def read_document(digest: str, name: str, media_type: str, mode: str, identity: str) -> str:
+def read_document(digest: str, name: str, media_type: str, mode: str, identity: str, max_pages: int) -> str:
     """Read one document with one engine.
 
-    `identity` is an argument for the memo key's sake alone: a different model, prompt or endpoint
-    changes it, so text read by one reader cannot be served for another. The file is checked against
-    the digest it was discovered under, so a corpus that moved under the run fails visibly.
+    `identity` and `max_pages` are arguments for the memo key's sake: a different model, prompt or
+    endpoint changes the identity, and a different page limit changes what is read at all. The file is
+    checked against the digest it was discovered under, so a corpus that moved under the run fails
+    visibly.
     """
     payload = (CORPUS / name).read_bytes()
     if hashlib.sha256(payload).hexdigest() != digest:
         raise ValueError(f"{name} does not hold the bytes its digest names")
-    document = parse_document(payload, media_type, name, mode, previews=False, max_pages=MAX_PAGES)
+    document = parse_document(payload, media_type, name, mode, previews=False, max_pages=max_pages or None)
     document["document"]["path"] = name
     document["document"]["digest"] = digest
     document["document"]["engine_identity"] = identity
@@ -123,6 +133,7 @@ async def index_one(source: SourceFile) -> Indexed:
             source.media_type,
             MODE,
             IDENTITY,
+            MAX_PAGES,
         )
     except Exception as error:  # noqa: BLE001 - one bad file must not stop the corpus
         return Indexed(source=source, error=f"{type(error).__name__}: {error}")
@@ -165,8 +176,11 @@ async def app_main() -> None:
         raise ConfigError("OCR_MODE=glm needs GLM_OCR_BASE_URL; leave the mode unset to use the CPU path")
     if not CORPUS.is_dir():
         raise ConfigError(f"OCR_CORPUS={str(CORPUS)!r} is not a directory")
+    if MAX_PAGES < 0:
+        raise ConfigError("OCR_MAX_PAGES must be 0 (every page) or a positive number")
     IDENTITY = engine_identity(MODE)
 
+    results: list[Indexed] = []
     sources: list[SourceFile] = []
     skipped: list[str] = []
     async for file in localfs.walk_dir(CORPUS, recursive=True):
@@ -176,14 +190,23 @@ async def app_main() -> None:
         if media_type is None:
             skipped.append(name)
             continue
-        payload = await file.read()
+        try:
+            payload = await file.read()
+        except OSError as error:
+            # Discovery reads bytes to identify the document. A file that cannot be read here is still
+            # a discovered document, and its failure belongs in the summary beside the others.
+            results.append(Indexed(
+                source=SourceFile(name=name, media_type=media_type, digest=""),
+                error=f"{type(error).__name__}: {error}",
+            ))
+            continue
         sources.append(SourceFile(name=name, media_type=media_type, digest=hashlib.sha256(payload).hexdigest()))
     sources.sort(key=lambda source: source.name)
     skipped.sort()
 
-    results = await coco.map(index_one, sources)
+    results.extend(await coco.map(index_one, sources))
 
-    for result in results:
+    for result in sorted(results, key=lambda item: item.source.name):
         assert result.source is not None
         target = OUT / "documents" / f"{result.source.name}.json"
         content = (
@@ -195,6 +218,11 @@ async def app_main() -> None:
         localfs.declare_file(target, content, create_parent_dirs=True)
 
     rows = _page_rows(results)
+    failures = sorted(
+        ({"document": result.source.name, "error": result.error}
+         for result in results if result.document is None),
+        key=lambda item: item["document"],
+    )
     localfs.declare_file(
         OUT / "pages.jsonl",
         "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
@@ -206,14 +234,11 @@ async def app_main() -> None:
             "corpus": CORPUS.name,
             "mode": MODE,
             "engine": IDENTITY,
-            "documents": len(sources),
+            "documents": len(results),
             "read": sum(1 for result in results if result.document is not None),
-            "failed": sum(1 for result in results if result.document is None),
+            "failed": len(failures),
             "pages": len(rows),
-            "failures": [
-                {"document": result.source.name, "error": result.error}
-                for result in results if result.document is None
-            ],
+            "failures": failures,
             "skipped": skipped,
         }),
         create_parent_dirs=True,

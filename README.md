@@ -82,11 +82,12 @@ OCR_CORPUS=scans OCR_MODE=fast .venv-index/bin/cocoindex update main.py
 
 It declares `out/documents/<path>.json` (per-page text and counts, plus the digest it was read
 from), `out/pages.jsonl` (one row per page) and `out/summary.json` (what ran, what failed, what was
-skipped). CocoIndex memoises reads in `cocoindex.db`; delete it to force a full re-read. `OCR_MODE`
-defaults to `glm` when `GLM_OCR_BASE_URL` is set and `fast` otherwise; `OCR_MAX_PAGES` defaults to
-every page (the upload API caps at 5), and `OCR_CORPUS` / `OCR_OUT` / `OCR_DB` name the rest. The fast
-path needs `lit`; GLM needs the endpoint above. The indexer is optional — the page and the API stay
-stdlib-only, and `requirements-cocoindex.txt` pins the one extra dependency.
+skipped). Reads are memoised in `cocoindex.db` on content digest + mode + engine identity + page
+limit; delete it to force a full re-read. `OCR_MODE` defaults to `glm` when `GLM_OCR_BASE_URL` is set
+and `fast` otherwise; `OCR_MAX_PAGES` defaults to every page (the upload API caps at 5), and
+`OCR_CORPUS` / `OCR_OUT` / `OCR_DB` name the rest. The fast path needs `lit`; GLM needs the endpoint
+above. The indexer is optional — the page and the API stay stdlib-only, and
+`requirements-cocoindex.txt` pins the one extra dependency.
 
 Re-running a parser writes its record; then `make site` picks it up:
 

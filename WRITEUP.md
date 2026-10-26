@@ -165,7 +165,8 @@ fast path rather than fail the first upload.
 
 **The same pipeline, indexed.** Reading lives in `pipeline.py`; the HTTP handler is a shell around it.
 `indexer/flow.py` is a CocoIndex app over the same functions: walk a directory, memoise each document
-on its content digest, mode and engine identity, and declare `out/documents/<path>.json`,
+on its content digest, mode, engine identity, page limit and a fingerprint of the reading code, and
+declare `out/documents/<path>.json`,
 `out/pages.jsonl` and `out/summary.json`. A second run with nothing changed reads nothing; editing one
 file, switching modes or changing the model re-reads exactly the documents that change affects. Across
 the six-page sample plus a PNG, the fast path read seven pages in 21.6 s, and a switch to GLM re-read
