@@ -25,6 +25,7 @@ from ..domain.ports import PageOcr
 from ..infrastructure.engines import (
     CHANDRA_SPEC,
     GLM_SPEC,
+    MINERU_SPEC,
     NEMOTRON_SPEC,
     UNLIMITED_SPEC,
     LiteParseEngine,
@@ -108,7 +109,24 @@ class Container(containers.DeclarativeContainer):
         api_key=settings.provided.glm_api_key,
         request_timeout=settings.provided.glm_request_timeout,
     )
-    engines = providers.Dict(glm=glm, fast=fast, chandra=chandra, nemotron=nemotron, unlimited=unlimited)
+    mineru = providers.Singleton(
+        VlmEngine,
+        spec=MINERU_SPEC,
+        base_url=settings.provided.mineru_base_url,
+        model="mineru",
+        # The wrapper runs MinerU's VLM backend; this only names the task it was asked for.
+        prompt="vlm-auto-engine",
+        api_key=settings.provided.glm_api_key,
+        request_timeout=settings.provided.glm_request_timeout,
+    )
+    engines = providers.Dict(
+        glm=glm,
+        fast=fast,
+        chandra=chandra,
+        nemotron=nemotron,
+        unlimited=unlimited,
+        mineru=mineru,
+    )
 
     registry = providers.Singleton(
         build_registry, engines=engines, default_mode=settings.provided.default_mode,
