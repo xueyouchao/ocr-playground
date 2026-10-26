@@ -465,23 +465,28 @@ function modeButtons() {
   return $("modes").querySelectorAll("[data-mode]");
 }
 
+// A read that is already running owns the picker: /api/health can resolve after the request went
+// out, and re-enabling the buttons then would only mislabel a request that has already been sent.
+let uploadBusy = false;
+
 function applyModes() {
   for (const button of modeButtons()) {
     button.setAttribute("aria-pressed", String(state.mode === button.dataset.mode));
-    button.disabled = !MODE_AVAILABLE[button.dataset.mode];
+    button.disabled = uploadBusy || !MODE_AVAILABLE[button.dataset.mode];
   }
 }
 
-function modeNote() {
-  return state.mode === "glm"
+function modeNote(mode = state.mode) {
+  return mode === "glm"
     ? "GLM-OCR runs on a scale-to-zero GPU — a cold start can take several minutes; LiteParse + Tesseract is the fast option"
     : "LiteParse + Tesseract runs on this server's CPU — a couple of seconds per page";
 }
 
 function setUploadBusy(busy) {
+  uploadBusy = busy;
   $("read-file").disabled = busy;
   $("file").disabled = busy;
-  for (const button of modeButtons()) button.disabled = busy || !MODE_AVAILABLE[button.dataset.mode];
+  applyModes();
 }
 
 // The server is the only thing that knows whether a GLM endpoint is configured for it. Ask once on
@@ -496,7 +501,10 @@ async function loadModes() {
     }
     if (!MODE_AVAILABLE.glm && state.mode === "glm") {
       state.mode = "fast";
-      uploadStatus("GLM-OCR is not configured on this server; using the fast option (LiteParse + Tesseract).");
+      // Do not talk over a read that is already running; its status describes the request it sent.
+      if (!uploadBusy) {
+        uploadStatus("GLM-OCR is not configured on this server; using the fast option (LiteParse + Tesseract).");
+      }
     }
     applyModes();
   } catch {
@@ -509,7 +517,7 @@ $("modes").addEventListener("click", (event) => {
   if (!button || button.disabled) return;
   state.mode = button.dataset.mode;
   applyModes();
-  uploadStatus(modeNote());
+  uploadStatus(modeNote(state.mode));
 });
 
 async function readUpload(file) {
@@ -517,7 +525,8 @@ async function readUpload(file) {
   setUploadBusy(true);
   const started = Date.now();
   const ticker = setInterval(() => {
-    uploadStatus(`reading ${file.name}… ${Math.round((Date.now() - started) / 1000)}s · ${modeNote()}`);
+    // The request's own mode, not the picker's: the picker is disabled, but health may still land.
+    uploadStatus(`reading ${file.name}… ${Math.round((Date.now() - started) / 1000)}s · ${modeNote(mode)}`);
   }, 1000);
   uploadStatus(`reading ${file.name}…`);
   try {
