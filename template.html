@@ -191,12 +191,9 @@
 <section class="uploader" id="uploader">
   <div>
     <b>Read your own document</b>
-    <span>A PDF (up to 5 pages) or a single image. The VLM parsers — <b>GLM-OCR</b> by default — read
-      handwriting and tables best, but each runs on its own scale-to-zero GPU: after it has been idle,
-      <b>the first upload can take 3 minutes on average</b> while the model boots. After that it
-      <b>stays warm for 2 minutes after the last request</b>, so <b>another upload inside that window takes
-      about 5 seconds a page</b>. <b>LiteParse + Tesseract</b> is the fast option — a couple of seconds per
-      page on this server's CPU — and visibly weaker on handwriting.</span>
+    <span>A PDF (up to 5 pages) or one image. <b>GLM-OCR</b> reads handwriting and tables best, but its GPU
+      scales to zero: the first upload after idle waits ~3 minutes for boot, then ~5 seconds a page while
+      warm (2 minutes). <b>LiteParse + Tesseract</b> is CPU-fast, but weaker on handwriting.</span>
     <div class="modes" id="modes">
       <span class="modes-label" id="modes-label">read it with</span>
       <div class="checks" id="mode-checks" role="group" aria-labelledby="modes-label">
