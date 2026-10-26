@@ -15,6 +15,11 @@ pattern, and a run of spaces in the query matches any whitespace, so a phrase st
 break. In `preview` the rendered text is searched, so a phrase also crosses a `<br>`, a block edge, or a
 table cell.
 
+A **night theme** is a click away on the title line: it swaps the palette, remembers the choice, and
+follows the OS (which is what makes the page go dark at sunset) until you pick one yourself. The
+preview panes are separate documents, so they are re-rendered in the same palette — no white rectangles
+left glowing in the middle of a dark page, and find marks keep a readable text colour at night.
+
 You can also **read your own document**: a PDF of up to five pages, or a single image (PNG, JPEG,
 TIFF, WebP), shown in the same layout. **GLM-OCR** is the default — it reads handwriting and tables
 best, but it runs on a scale-to-zero GPU, so the first upload after idle takes about three minutes

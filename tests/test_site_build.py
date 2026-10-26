@@ -166,3 +166,49 @@ def test_the_mode_fallback_only_picks_a_parser_that_can_run() -> None:
     # A /api/health reply that lands after the visitor picked must not undo the pick.
     assert "if (!userChoseMode && MODE_AVAILABLE[health.default_mode])" in body
     assert "userChoseMode = true;" in template
+
+
+def test_the_night_theme_is_chosen_before_the_first_paint() -> None:
+    """Night must not start as a flash of white: the palette is picked in <head>, not on load."""
+    template = (ROOT / "template.html").read_text()
+    head = template[: template.index("</head>")]
+
+    assert 'document.documentElement.dataset.theme' in head
+    assert "prefers-color-scheme: dark" in head, "a machine already in night mode is the default"
+
+
+def test_the_night_theme_is_a_palette_swap_not_a_second_page() -> None:
+    template = (ROOT / "template.html").read_text()
+
+    assert ':root[data-theme="dark"]' in template
+    # Every surface the day theme paints white is a variable; one hard-coded white card is a lit
+    # rectangle at midnight, and it is exactly the kind that gets added later.
+    assert "background: #fff" not in template
+    assert 'id="theme"' in template
+    # A remembered choice, with the OS as the fallback rather than a one-way switch.
+    assert "localStorage.setItem" in template
+    assert "storedTheme()" in template
+
+
+def test_the_night_theme_reaches_into_the_previews() -> None:
+    """A preview is its own document, so it inherits neither the palette nor the mark ink."""
+    template = (ROOT / "template.html").read_text()
+
+    assert "PREVIEW_DARK_STYLE" in template
+    assert "${previewStyle()}" in template
+    # The marks inside a frame are inline styles: `color: inherit` would be light text on a light mark.
+    assert "FIND_MARKS" in template
+    assert "color:#fff6d8" in template
+
+
+def test_a_refused_storage_write_cannot_freeze_the_toggle() -> None:
+    """The applied theme is held in memory; storage is only how it survives a reload."""
+    template = (ROOT / "template.html").read_text()
+    body = template[template.index("function currentTheme"):]
+    body = body[: body.index("\n}\n")]
+
+    # Reading the theme back out of storage would answer with the OS preference whenever a write was
+    # refused -- the page changes, the previews keep the old palette, and every click asks for the
+    # same theme again.
+    assert "chosenTheme" in body, "the current theme must not be read back from storage"
+    assert "localStorage" not in body
