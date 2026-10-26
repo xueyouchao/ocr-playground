@@ -396,15 +396,18 @@ function highlightText(text, query) {
 
 // The preview is a rendering of the same text, so a match is marked where it survives rendering.
 // The walker skips style/script/svg text: a hit inside CSS or a diagram is not one a reader can see.
-function highlightPreview(html, query) {
-  const regex = findRegex(query);
-  if (!regex) return { html, count: 0 };
-  // A preview can be a fragment or a whole document (Chandra emits one); DOMParser accepts both and
-  // the parser's own <style> rules survive the round trip.
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      const parent = node.parentElement;
+const BLOCK_TAGS = new Set([
+  "ADDRESS", "ARTICLE", "ASIDE", "BLOCKQUOTE", "CAPTION", "DD", "DIV", "DL", "DT", "FIELDSET",
+  "FIGCAPTION", "FIGURE", "FOOTER", "FORM", "H1", "H2", "H3", "H4", "H5", "H6", "HEADER", "HR",
+  "LI", "MAIN", "NAV", "OL", "P", "PRE", "SECTION", "TABLE", "TBODY", "TD", "TFOOT", "TH",
+  "THEAD", "TR", "UL",
+]);
+const previewReady = new Set();
+
+function visibleTextNodes(root, doc) {
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(text) {
+      const parent = text.parentElement;
       if (!parent || /^(SCRIPT|STYLE|NOSCRIPT|TEXTAREA)$/.test(parent.tagName)) return NodeFilter.FILTER_REJECT;
       if (parent.closest("svg")) return NodeFilter.FILTER_REJECT;
       return NodeFilter.FILTER_ACCEPT;
@@ -412,28 +415,124 @@ function highlightPreview(html, query) {
   });
   const nodes = [];
   while (walker.nextNode()) nodes.push(walker.currentNode);
+  return nodes;
+}
 
+// What separates two visible text nodes, if anything. A <br> or a block boundary reads as a space
+// ("Total<br>Alcohol" is the phrase "total alcohol"); inline markup does not ("<b>Total</b>Alcohol"
+// still reads as one word). This is what lets a phrase cross the markup a table is built from.
+function visibleGap(previous, node, doc) {
+  const range = doc.createRange();
+  range.setStartAfter(previous);
+  range.setEndBefore(node);
+  const between = range.cloneContents();
+  if (between.querySelector("br")) return " ";
+  const walker = doc.createTreeWalker(between, NodeFilter.SHOW_ELEMENT);
+  while (walker.nextNode()) {
+    if (BLOCK_TAGS.has(walker.currentNode.tagName)) return " ";
+  }
+  return "";
+}
+
+// Remove the marks a previous query left behind, without touching a <mark> the parser itself wrote.
+function clearPreviewMarks(doc) {
+  for (const mark of Array.from(doc.querySelectorAll("mark[data-hit]"))) {
+    const parent = mark.parentNode;
+    if (!parent) continue;
+    mark.replaceWith(doc.createTextNode(mark.textContent));
+    parent.normalize();
+  }
+}
+
+// Search the preview's visible text as one string and map each match back to the text nodes it
+// covers. One match can produce several <mark> slices (a <br> or a table cell can split it); those
+// slices share a data-hit, so the counter counts hits and navigation moves a whole hit at a time.
+function highlightDocument(doc, query) {
+  clearPreviewMarks(doc);
+  const regex = findRegex(query);
+  if (!regex || !doc.body) return 0;
+
+  const segments = [];
+  let visible = "";
+  let previous = null;
+  for (const node of visibleTextNodes(doc.body, doc)) {
+    if (previous) visible += visibleGap(previous, node, doc);
+    const start = visible.length;
+    visible += node.nodeValue;
+    segments.push({ node, start, end: visible.length });
+    previous = node;
+  }
+
+  const parts = new Map();
   let count = 0;
-  for (const node of nodes) {
-    regex.lastIndex = 0;
-    const matches = Array.from(node.nodeValue.matchAll(regex));
-    if (!matches.length) continue;
+  for (const match of visible.matchAll(regex)) {
+    const from = match.index;
+    const to = from + match[0].length;
+    for (const segment of segments) {
+      if (segment.end <= from) continue;
+      if (segment.start >= to) break;
+      const start = Math.max(from, segment.start) - segment.start;
+      const end = Math.min(to, segment.end) - segment.start;
+      if (start >= end) continue;
+      if (!parts.has(segment.node)) parts.set(segment.node, []);
+      parts.get(segment.node).push({ start, end, hit: count });
+    }
+    count += 1;
+  }
+
+  for (const [node, ranges] of parts) {
+    const text = node.nodeValue;
     const fragment = doc.createDocumentFragment();
     let cursor = 0;
-    for (const match of matches) {
-      if (match.index > cursor) fragment.append(node.nodeValue.slice(cursor, match.index));
+    for (const range of ranges) {
+      if (range.start > cursor) fragment.append(text.slice(cursor, range.start));
       const mark = doc.createElement("mark");
-      mark.textContent = match[0];
-      mark.dataset.hit = String(count);
+      mark.textContent = text.slice(range.start, range.end);
+      mark.dataset.hit = String(range.hit);
       mark.setAttribute("style", FIND_STYLE);
       fragment.append(mark);
-      cursor = match.index + match[0].length;
-      count += 1;
+      cursor = range.end;
     }
-    if (cursor < node.nodeValue.length) fragment.append(node.nodeValue.slice(cursor));
+    if (cursor < text.length) fragment.append(text.slice(cursor));
     node.parentNode.replaceChild(fragment, node);
   }
+  return count;
+}
+
+function highlightPreview(html, query) {
+  if (!findRegex(query)) return { html, count: 0 };
+  // A preview can be a fragment or a whole document (Chandra emits one); DOMParser accepts both and
+  // the parser's own <style> rules survive the round trip.
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const count = highlightDocument(doc, query);
   return { html: "<!doctype html>\n" + doc.documentElement.outerHTML, count };
+}
+
+function previewDocumentOf(systemId) {
+  if (!previewReady.has(systemId)) return null;
+  const pane = paneElement(systemId);
+  const frame = pane && pane.querySelector("iframe");
+  if (!frame) return null;
+  try {
+    return frame.contentDocument && frame.contentDocument.body ? frame.contentDocument : null;
+  } catch {
+    return null;
+  }
+}
+
+// Re-highlight the live preview in place. It is synchronous, so Enter after typing steps the marks
+// that are on screen, never the previous query's.
+function refreshPreviewFind(systemId) {
+  const pane = paneElement(systemId);
+  const doc = previewDocumentOf(systemId);
+  if (!pane || !doc) return false;
+  const entry = findEntry(systemId);
+  const count = highlightDocument(doc, entry.query);
+  const frame = pane.querySelector("iframe");
+  if (frame) frame.dataset.query = entry.query;
+  paintFindStatus(pane, systemId, count, true);
+  applyCurrentMatch(systemId);
+  return true;
 }
 
 function findEntry(systemId) {
@@ -451,21 +550,48 @@ function paneElement(systemId) {
 
 function marksInPane(pane) {
   const frame = pane.querySelector("iframe");
-  if (!frame) return Array.from(pane.querySelectorAll(".body mark"));
+  // Only the marks this find bar made: a parser may have written <mark> of its own, and those are
+  // content, not hits.
+  if (!frame) return Array.from(pane.querySelectorAll(".body mark[data-hit]"));
   try {
     // The iframe is sandboxed without scripts but with same-origin, so its marks are readable here.
-    return frame.contentDocument ? Array.from(frame.contentDocument.querySelectorAll("mark")) : [];
+    return frame.contentDocument ? Array.from(frame.contentDocument.querySelectorAll("mark[data-hit]")) : [];
   } catch {
     return [];
   }
 }
 
+// One hit can be several <mark> slices in the preview (a <br> or a cell boundary can split it), so
+// group by data-hit before counting or stepping.
+function hitGroups(marks) {
+  const groups = new Map();
+  for (const mark of marks) {
+    const key = mark.dataset.hit;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(mark);
+  }
+  return [...groups.values()];
+}
+
 function findStatus(find, matches, searchable) {
   const query = find.query.trim();
-  if (!query) return { text: "", none: false, enabled: false };
-  if (!searchable) return { text: "no output", none: true, enabled: false };
-  if (!matches) return { text: "no matches", none: true, enabled: false };
-  return { text: `${Math.min(find.active, matches - 1) + 1}/${matches}`, none: false, enabled: matches > 1 };
+  if (!query) {
+    find.active = 0;
+    return { text: "", none: false, enabled: false };
+  }
+  if (!searchable) {
+    find.active = 0;
+    return { text: "no output", none: true, enabled: false };
+  }
+  if (!matches) {
+    find.active = 0;
+    return { text: "no matches", none: true, enabled: false };
+  }
+  // Clamp once, before both the counter and the highlighted mark are painted. The counter used to
+  // clamp while the highlight wrapped, so a fifth hit in text could show "3/3" beside the second
+  // mark in preview.
+  find.active = Math.min(Math.max(find.active, 0), matches - 1);
+  return { text: `${find.active + 1}/${matches}`, none: false, enabled: matches > 1 };
 }
 
 function applyCurrentMatch(systemId) {
@@ -473,17 +599,21 @@ function applyCurrentMatch(systemId) {
   const entry = state.find[systemId];
   if (!pane || !entry || !entry.query.trim()) return;
   const marks = marksInPane(pane);
-  if (!marks.length) return;
-  const index = ((entry.active % marks.length) + marks.length) % marks.length;
+  const groups = hitGroups(marks);
+  if (!groups.length) return;
+  const index = Math.min(Math.max(entry.active, 0), groups.length - 1);
   entry.active = index;
   const inFrame = Boolean(pane.querySelector("iframe"));
-  marks.forEach((mark, position) => {
-    const current = position === index;
-    mark.classList.toggle("current", current);
-    // A preview carries the parser's own stylesheet, so its current mark is styled inline.
-    if (inFrame) mark.setAttribute("style", current ? FIND_CURRENT_STYLE : FIND_STYLE);
+  marks.forEach((mark) => {
+    mark.classList.remove("current");
+    // A preview carries the parser's own stylesheet, so its marks are styled inline.
+    if (inFrame) mark.setAttribute("style", FIND_STYLE);
   });
-  const mark = marks[index];
+  for (const mark of groups[index]) {
+    mark.classList.add("current");
+    if (inFrame) mark.setAttribute("style", FIND_CURRENT_STYLE);
+  }
+  const mark = groups[index][0];
   if (inFrame) {
     mark.scrollIntoView({ block: "center" });
   } else {
@@ -511,10 +641,16 @@ function stepMatch(systemId, direction) {
   const pane = paneElement(systemId);
   const entry = state.find[systemId];
   if (!pane || !entry || !entry.query.trim()) return;
-  const matches = marksInPane(pane).length;
-  if (!matches) return;
-  entry.active = ((entry.active + direction) % matches + matches) % matches;
-  paintFindStatus(pane, systemId, matches, true);
+  // The frame has not loaded this query yet: apply the keypress when it does rather than stepping
+  // the previous query's marks.
+  if (pane.querySelector("iframe") && !previewReady.has(systemId)) {
+    (entry.pendingSteps || (entry.pendingSteps = [])).push(direction);
+    return;
+  }
+  const groups = hitGroups(marksInPane(pane));
+  if (!groups.length) return;
+  entry.active = ((entry.active + direction) % groups.length + groups.length) % groups.length;
+  paintFindStatus(pane, systemId, groups.length, true);
   applyCurrentMatch(systemId);
 }
 
@@ -566,7 +702,8 @@ function paneContent(system, cell, view, find) {
     // `allow-same-origin` lets the find bar reach the frame's marks and scroll the current one into
     // view. Scripts, forms and top navigation remain blocked, so the parser's markup stays inert.
     return {
-      html: `<iframe sandbox="allow-same-origin" title="${escapeAttribute(system.name)} rendered output" `
+      html: `<iframe sandbox="allow-same-origin" data-query="${escapeAttribute(find.query)}" `
+        + `title="${escapeAttribute(system.name)} rendered output" `
         + `srcdoc="${escapeAttribute(marked.html)}"></iframe>`,
       matches: marked.count,
       searchable,
@@ -626,18 +763,38 @@ function renderPanes() {
   }
 }
 
-// An iframe's srcdoc loads after innerHTML returns, and a cached document can be complete before
-// the listener is attached; both paths have to end in the current match being scrolled into view.
+// The iframe's srcdoc loads after innerHTML returns. Until its load event the frame belongs to the
+// previous query, so steps wait (see stepMatch) and the find status is already painted from the
+// content that is about to arrive.
 function wirePane(pane, systemId) {
   const frame = pane.querySelector("iframe");
   if (!frame) {
     applyCurrentMatch(systemId);
     return;
   }
-  frame.addEventListener("load", () => applyCurrentMatch(systemId));
-  if (frame.contentDocument && frame.contentDocument.readyState === "complete") {
+  previewReady.delete(systemId);
+  const onLoad = () => {
+    // A replaced frame can still fire its old load event; only the live frame may paint.
+    if (!pane.isConnected || paneElement(systemId) !== pane || pane.querySelector("iframe") !== frame) return;
+    if (frame.dataset.ready === "1") return;
+    frame.dataset.ready = "1";
+    previewReady.add(systemId);
+    const entry = findEntry(systemId);
+    // The user may have typed while the frame was loading; re-highlight with the current query.
+    if (frame.dataset.query !== entry.query) {
+      const doc = previewDocumentOf(systemId);
+      if (doc) {
+        const count = highlightDocument(doc, entry.query);
+        frame.dataset.query = entry.query;
+        paintFindStatus(pane, systemId, count, true);
+      }
+    }
     applyCurrentMatch(systemId);
-  }
+    const pending = entry.pendingSteps || [];
+    entry.pendingSteps = [];
+    for (const direction of pending) stepMatch(systemId, direction);
+  };
+  frame.addEventListener("load", onLoad, { once: true });
 }
 
 // Repaint one pane without rebuilding its header, so the find input keeps focus and its caret while
@@ -662,18 +819,13 @@ function paintPane(systemId) {
   wirePane(pane, systemId);
 }
 
-const pendingPaints = new Map();
-
 function setFind(systemId, query) {
   state.find[systemId] = { query, active: 0 };
-  clearTimeout(pendingPaints.get(systemId));
-  // Replacing a preview's srcdoc reloads the frame, so wait for a pause in typing rather than
-  // reload a long table on every key; highlighting text is cheap enough to do immediately.
-  if (paneView(systemId) === "preview") {
-    pendingPaints.set(systemId, setTimeout(() => paintPane(systemId), 150));
-  } else {
-    paintPane(systemId);
-  }
+  // A loaded preview is re-highlighted in place: no reload, no debounce, and Enter immediately
+  // afterwards steps the marks that are already on screen. A frame that is still loading falls back
+  // to a rebuild, and its load handler applies any keypress queued in the meantime.
+  if (paneView(systemId) === "preview" && refreshPreviewFind(systemId)) return;
+  paintPane(systemId);
 }
 
 function renderFooter() {
@@ -883,9 +1035,6 @@ $("back-to-sample").addEventListener("click", () => {
 });
 
 function render() {
-  // A debounced preview repaint belongs to the view that was on screen when it was scheduled.
-  for (const timer of pendingPaints.values()) clearTimeout(timer);
-  pendingPaints.clear();
   renderRail();
   renderStrip();
   renderPanes();

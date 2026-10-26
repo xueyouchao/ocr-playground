@@ -12,7 +12,8 @@ pane — in `text` and in `preview` alike — with a match count and `‹` / `�
 Shift+Enter) to step between hits. A query stays with its pane when you change pages, so the same field
 can be looked up in every parser's reading of every page. Matches are literal: punctuation is not a
 pattern, and a run of spaces in the query matches any whitespace, so a phrase still works across a line
-break.
+break. In `preview` the rendered text is searched, so a phrase also crosses a `<br>`, a block edge, or a
+table cell.
 
 You can also **read your own document**: a PDF of up to five pages, or a single image (PNG, JPEG,
 TIFF, WebP), shown in the same layout. **GLM-OCR** is the default — it reads handwriting and tables
