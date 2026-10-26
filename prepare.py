@@ -23,7 +23,7 @@ def main() -> None:
         shutil.rmtree(OUT)
     OUT.mkdir(parents=True)
     subprocess.run(["pdftoppm", "-png", "-r", str(args.dpi), args.pdf, str(OUT / "page")], check=True)
-    pages = sorted(OUT.glob("page-*.png"))
+    pages = sorted(OUT.glob("page-*.png"), key=lambda path: int(path.stem.split("-")[1]))
     print(f"{len(pages)} pages at {args.dpi} dpi in {OUT}")
 
     # A lighter copy for the page's own preview rail; poppler writes these directly, no PIL needed.
@@ -33,7 +33,7 @@ def main() -> None:
     previews.mkdir(parents=True)
     subprocess.run(["pdftoppm", "-jpeg", "-r", "110", "-jpegopt", "quality=78",
                     args.pdf, str(previews / "page")], check=True)
-    written = sorted(previews.glob("page-*.jpg"))
+    written = sorted(previews.glob("page-*.jpg"), key=lambda path: int(path.stem.split("-")[1]))
     print(f"{len(written)} previews in {previews} ({sum(p.stat().st_size for p in written) // 1024} KB)")
 
 

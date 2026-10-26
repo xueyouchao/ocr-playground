@@ -30,7 +30,6 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_PAGES = 5
 PARSE_TIMEOUT_SECONDS = 120
 RENDER_DPI = 200
-PREVIEW_DPI = 110
 
 PDF_TYPES = {"application/pdf", "application/x-pdf"}
 IMAGE_TYPES = {"image/png", "image/jpeg", "image/tiff", "image/webp"}
