@@ -13,6 +13,11 @@ app = modal.App("ocr-playground-glm-ocr")
 
 hf_cache = modal.Volume.from_name("ocr-playground-hf", create_if_missing=True)
 
+# vLLM compiles the backbone with torch.compile on startup — 27 s of the ~60 s engine init — and
+# writes the result to ~/.cache/vllm. That path is not mounted, so every scale-to-zero wake-up pays
+# the compile again. Mounting it makes the first cold start the only one that compiles.
+compile_cache = modal.Volume.from_name("ocr-playground-vllm-cache", create_if_missing=True)
+
 # add_python: the upstream image ships vLLM's own interpreter, which Modal cannot fingerprint.
 image = (
     modal.Image.from_registry("vllm/vllm-openai:latest", add_python="3.12")
@@ -26,7 +31,11 @@ MODEL = "zai-org/GLM-OCR"
 @app.function(
     image=image,
     gpu="L4",                     # 24GB: a 0.9B VLM plus its KV cache fits with room to spare
-    volumes={"/root/.cache/huggingface": hf_cache},
+    volumes={
+        "/root/.cache/huggingface": hf_cache,
+        # VLLM_CACHE_ROOT defaults to /root/.cache/vllm; the mount path has to match it.
+        "/root/.cache/vllm": compile_cache,
+    },
     timeout=3600,
     scaledown_window=300,
     startup_timeout=1800,
