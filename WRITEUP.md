@@ -30,8 +30,10 @@ flight/field forms, heavy on tables and column abbreviations.
 ## 2. What the artifact is
 
 A single static page. Left: the scanned page. Right: eight panes, one per parser, each showing either
-the exact text that parser emitted or a rendered preview of it. Above: six page chips, each annotated
-with how many parsers produced text for that page. Below the fold: counts per pane, and provenance.
+the exact text that parser emitted or a rendered preview of it. Each pane carries its own find bar:
+matching text is marked and counted in both views, and the query survives a page switch so the same
+field can be looked for in every parser's reading. Above: six page chips, each annotated with how many
+parsers produced text for that page. Below the fold: counts per pane, and provenance.
 
 It supports two document sources through one renderer:
 
@@ -300,7 +302,7 @@ records/<id>.json        {"page-1": "text…"} — raw output, never hand-edited
 systems.json             the roster the page renders
 collect.py               records + roster → evidence.json
 build.py                 template.html + evidence.json → index.html
-template.html            the page: rail, page strip, eight panes, upload panel
+template.html            the page: rail, page strip, eight panes with find bars, upload panel
 api/server.py            the upload service: GLM-OCR by default, LiteParse + Tesseract for speed
 pipeline.py              the reading shared by that service and the indexer
 main.py                  CocoIndex entry point; indexer/flow.py walks a corpus and declares out/
