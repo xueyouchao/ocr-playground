@@ -1,10 +1,14 @@
-"""Inline the evidence into one shareable page."""
-import json
+"""Compatibility entry point: `python build.py`, and the second half of `make site`."""
+from __future__ import annotations
+
+import sys
 from pathlib import Path
 
-here = Path(__file__).resolve().parent
-evidence = json.loads((here / "evidence.json").read_text(encoding="utf-8"))
-payload = json.dumps(evidence, ensure_ascii=False).replace("<", "\\u003c")
-template = (here / "template.html").read_text(encoding="utf-8")
-(here / "index.html").write_text(template.replace("__EVIDENCE__", payload), encoding="utf-8")
-print(f"wrote {here / 'index.html'} ({(here / 'index.html').stat().st_size:,} bytes)")
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from ocr_playground.interfaces.site.build import main  # noqa: E402
+
+if __name__ == "__main__":
+    main(ROOT)

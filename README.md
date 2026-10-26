@@ -56,15 +56,23 @@ make site           # records/ -> evidence.json -> index.html
 make serve          # http://127.0.0.1:8080
 ```
 
-`make pages` needs poppler (`pdftoppm`). `make site` needs nothing but Python 3.11+.
+`make pages` needs poppler (`pdftoppm`). `make site` needs nothing but Python 3.11+ — the build is
+stdlib-only and does not import the service's container.
 
-The upload service is a separate process; run it beside the page. GLM-OCR is the default and needs an
-OpenAI-compatible endpoint; without one the server stays up but only the fast path is available:
+The upload service is a separate process, wired with
+[python-dependency-injector](https://github.com/ets-labs/python-dependency-injector). Create the venv
+once, then run it beside the page. GLM-OCR is the default and needs an OpenAI-compatible endpoint;
+without one the server stays up but only the fast path is available:
 
 ```bash
-GLM_OCR_BASE_URL=https://<your-modal-app>.modal.run/v1 python api/server.py --port 8090
-python api/server.py --port 8090        # no endpoint: fast (LiteParse + Tesseract) only
+make venv                                     # dependency-injector + pytest
+GLM_OCR_BASE_URL=https://<your-modal-app>.modal.run/v1 make api
+make api                                      # no endpoint: fast (LiteParse + Tesseract) only
 ```
+
+`make test` runs the offline suite (no GPU, no LiteParse, no poppler). The fast path needs LiteParse
+(`pip install liteparse==2.17.0`, which provides the `lit` CLI) and Tesseract on the host or in the
+image.
 
 `GET /api/health` reports which modes this server can run. `POST /api/parse` takes the file as the
 body and `X-Mode: glm|fast` (or `?mode=fast`); with neither, it uses GLM-OCR. The GLM path is the
@@ -76,9 +84,10 @@ In production the service runs as its own container behind the same Traefik rout
 
 ### Index a corpus with CocoIndex
 
-The upload API reads one document per request. The same pipeline (`pipeline.py`) is also a CocoIndex
-app, so a directory can be read incrementally — a file that did not change is not read again, and
-changing a file, the mode or the model re-reads only what that change affects.
+The upload API reads one document per request. That reading is a use case
+(`ReadDocumentService`), and the indexer is a second way to call it, so a directory can be read
+incrementally — a file that did not change is not read again, and changing a file, the mode or the
+model re-reads only what that change affects.
 
 ```bash
 python3 -m venv .venv-index
@@ -94,8 +103,8 @@ skipped). Reads are memoised in `cocoindex.db` on content digest + mode + engine
 limit; delete it to force a full re-read. `OCR_MODE` defaults to `glm` when `GLM_OCR_BASE_URL` is set
 and `fast` otherwise; `OCR_MAX_PAGES` defaults to every page (the upload API caps at 5), and
 `OCR_CORPUS` / `OCR_OUT` / `OCR_DB` name the rest. The fast path needs `lit`; GLM needs the endpoint
-above. The indexer is optional — the page and the API stay stdlib-only, and
-`requirements-cocoindex.txt` pins the one extra dependency.
+above. The indexer is optional and pinned in `requirements-cocoindex.txt`, which now also installs
+the service's one runtime dependency.
 
 Re-running a parser writes its record; then `make site` picks it up:
 
@@ -159,23 +168,45 @@ verbose pipeline fallback.
 - **Structure without content looks like success.** The empty-cell table is the most dangerous output
   here, because a screenshot of it looks parsed.
 
+## How it is put together
+
+The reading is organised as domain → application → infrastructure → interfaces, wired by a
+dependency-injection container. The short version:
+
+| layer | holds |
+| --- | --- |
+| `domain/` | `SourceDocument`, `ReadDocument`, `ReadingStats`, `EngineSpec`, the port Protocols, the errors a bad request deserves |
+| `application/` | `ReadDocumentService` (render → read → preview, one budget) and the parse-slot gate |
+| `infrastructure/` | poppler, ImageMagick, LiteParse, GLM-OCR, settings, temp dirs, the reading fingerprint |
+| `interfaces/` | the HTTP handler, the CocoIndex flow, the static site build, the evidence mapping |
+| `composition/` | `container.py`: configuration, singletons, and the only place every layer is known |
+
+[`docs/architecture.md`](docs/architecture.md) explains the boundaries, the ports, why the container
+is worth a compiled dependency, and how the suite replaces a port instead of patching a module.
+
 ## Layout
 
 ```
 corpus/document.pdf      the six-page scan (source of truth)
-prepare.py               poppler -> /tmp/ocr-playground/pages (200 dpi) + assets/pages (110 dpi)
 runners/                 one file per CPU parser; _common.py defines the record shape
 modal/                   one app per GPU parser, all scale-to-zero
 records/<id>.json        {"page-1": "text…", …} — raw output, never hand-edited
 systems.json             the roster the page renders (name, pipeline, device, how to run)
-api/server.py            the upload service: GLM-OCR by default, LiteParse + Tesseract for speed
-pipeline.py              the reading both the API and the indexer call (render + GLM-OCR / LiteParse)
-main.py                  CocoIndex entry point: index a corpus into out/ incrementally
-indexer/flow.py          walk OCR_CORPUS, memoise a read per digest+mode+identity, declare out/
-requirements-cocoindex.txt  the indexer's one optional dependency, pinned
-collect.py               records + roster -> evidence.json
-build.py                 template.html + evidence.json -> index.html
 template.html            the page: source rail, eight panes, text/preview + a find bar per pane
+ocr_playground/
+  domain/                documents, readings, engines, ports, domain errors
+  application/           the read-document use case and the two-slot gate
+  infrastructure/        poppler, ImageMagick, LiteParse, GLM-OCR, settings, fingerprint
+  interfaces/            http/, indexer/, site/, evidence.py
+  composition/           the dependency-injector container
+api/server.py            compatibility entry point -> interfaces/http
+main.py                  CocoIndex entry point -> interfaces/indexer
+collect.py build.py      compatibility entry points -> interfaces/site
+prepare.py               compatibility entry point -> interfaces/site/prepare
+docs/architecture.md     the design note behind the structure
+tests/                   the offline suite; tests/fakes.py holds the doubles
+requirements.txt         dependency-injector, pinned (the upload service only)
+requirements-cocoindex.txt  the indexer's extra dependency, pinned
 ```
 
 ## Further reading

@@ -3,11 +3,13 @@
     python -m venv .venv-index && .venv-index/bin/pip install -r requirements-cocoindex.txt
     .venv-index/bin/cocoindex update main.py
 
-Environment: OCR_CORPUS, OCR_OUT, OCR_DB, OCR_MODE, OCR_MAX_PAGES — see indexer/flow.py and README.
+The app itself lives in `ocr_playground/interfaces/indexer/flow.py`; CocoIndex needs a file at the
+repository root to point its update at. Environment: OCR_CORPUS, OCR_OUT, OCR_DB, OCR_MODE,
+OCR_MAX_PAGES — see that module and the README.
 """
 import cocoindex as coco
 
-from indexer.flow import build_app
+from ocr_playground.interfaces.indexer.flow import build_app
 
 app = build_app()
 

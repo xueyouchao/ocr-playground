@@ -1,0 +1,6 @@
+# The upload service's runtime dependency. The static site (`make site`, `make pages`) stays
+# stdlib-only: it imports the package's domain and site modules, never the container.
+#
+# Pinned exactly, like the indexer: a new major of the injector changes container semantics, and this
+# project prefers a deliberate bump to a surprise resolution in a rebuilt image.
+dependency-injector==4.49.1

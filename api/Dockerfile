@@ -5,11 +5,13 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends poppler-utils tesseract-ocr imagemagick \
  && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir liteparse==2.17.0
-
 WORKDIR /app
-# Built from the repository root: the reading lives in pipeline.py, shared with the indexer.
-COPY pipeline.py /app/pipeline.py
+# Built from the repository root. The service is the package; api/server.py is the compatibility
+# entry point the CMD still uses. dependency-injector is pinned in requirements.txt.
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt liteparse==2.17.0
+
+COPY ocr_playground /app/ocr_playground
 COPY api/server.py /app/api/server.py
 
 EXPOSE 8090

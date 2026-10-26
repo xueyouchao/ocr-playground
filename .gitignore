@@ -4,6 +4,8 @@ __pycache__/
 .venv/
 .venv-index/
 /tmp/
+.pytest_cache/
+.ruff_cache/
 
 # the indexer's declared output and CocoIndex's memo database
 /out/
