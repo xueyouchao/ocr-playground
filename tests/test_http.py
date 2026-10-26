@@ -1,0 +1,294 @@
+"""The upload API's contract: status codes, bodies, and the defences around a public endpoint.
+
+A real socket and a real server; only the use case is replaced, so these tests pin what a client sees
+rather than which function the handler happened to call.
+"""
+from __future__ import annotations
+
+import json
+import socket
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+import pytest
+
+from fakes import FAST, FakeSlots, StubService, build_rig, sample_document
+from ocr_playground.application.errors import EngineFailure, EngineTimeout, EngineUnavailable
+from ocr_playground.composition.container import Container
+from ocr_playground.domain.errors import UnknownMode
+from ocr_playground.infrastructure.process import CommandTimedOut
+from ocr_playground.interfaces.evidence import document_evidence
+from ocr_playground.interfaces.http import Handler, UploadHTTPServer, build_health, failure_response
+
+
+@pytest.fixture
+def api():
+    servers: list[UploadHTTPServer] = []
+
+    def make(*, service=None, rig=None, slots=None, **config) -> tuple[str, Container]:
+        container = Container()
+        if config:
+            container.config.from_dict(config)
+        if rig is not None:
+            container.read_document.override(rig.service)
+        if service is not None:
+            container.read_document.override(service)
+        container.parse_slots.override(slots or FakeSlots())
+        httpd = UploadHTTPServer(("127.0.0.1", 0), Handler, container)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        servers.append(httpd)
+        return f"http://127.0.0.1:{httpd.server_address[1]}", container
+
+    yield make
+    for httpd in servers:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def call(base: str, path: str, *, method: str = "GET", body: bytes | None = None,
+         headers: dict[str, str] | None = None) -> tuple[int, dict, bytes]:
+    request = urllib.request.Request(base + path, data=body, method=method, headers=headers or {})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, dict(response.headers), response.read()
+    except urllib.error.HTTPError as error:
+        return error.code, dict(error.headers), error.read()
+
+
+def payload(response: bytes) -> dict:
+    return json.loads(response)
+
+
+def test_health_reports_modes_and_limits(api) -> None:
+    base, _ = api(glm_base_url="http://stub/v1")
+    status, headers, body = call(base, "/api/health")
+
+    assert status == 200
+    assert headers["Content-Type"] == "application/json"
+    assert headers["Access-Control-Allow-Origin"] == "*"
+    assert headers["Cache-Control"] == "no-store"
+    assert payload(body) == {
+        "ok": True,
+        "default_mode": "glm",
+        "modes": [
+            {
+                "id": "glm",
+                "name": "GLM-OCR",
+                "available": True,
+                "cold_start": True,
+                "detail": "0.9B VLM on a scale-to-zero GPU; the first upload after idle can take minutes",
+            },
+            {
+                "id": "fast",
+                "name": "LiteParse + Tesseract",
+                "available": True,
+                "cold_start": False,
+                "detail": "CPU OCR on this server; a couple of seconds per page",
+            },
+        ],
+        "limits": {"bytes": 20 * 1024 * 1024, "pages": 5},
+    }
+
+
+def test_health_admits_when_glm_has_no_endpoint(api) -> None:
+    base, _ = api()
+    _, _, body = call(base, "/api/health")
+    modes = {mode["id"]: mode for mode in payload(body)["modes"]}
+    assert modes["glm"]["available"] is False
+    assert modes["fast"]["available"] is True
+
+
+def test_options_preflights_the_upload(api) -> None:
+    base, _ = api()
+    status, headers, body = call(base, "/api/parse", method="OPTIONS")
+    assert status == 204
+    assert body == b""
+    assert headers["Access-Control-Allow-Methods"] == "POST, GET, OPTIONS"
+    assert "X-Filename" in headers["Access-Control-Allow-Headers"]
+    assert "X-Mode" in headers["Access-Control-Allow-Headers"]
+
+
+def test_unknown_paths_are_never_parsed(api) -> None:
+    base, _ = api()
+    assert call(base, "/api/nope")[0] == 404
+    assert call(base, "/", method="POST", body=b"x")[0] == 404
+    assert call(base, "/api/parse")[0] == 404
+
+
+def test_an_upload_without_a_body_is_refused(api) -> None:
+    base, _ = api()
+    status, _, body = call(base, "/api/parse", method="POST")
+    assert status == 411
+    assert payload(body) == {"error": "send the file as the request body"}
+
+
+def test_an_upload_over_the_size_limit_is_refused_before_the_body(api) -> None:
+    base, _ = api()
+    status, _, body = call(base, "/api/parse", method="POST",
+                           headers={"Content-Length": str(20 * 1024 * 1024 + 1)})
+    assert status == 413
+    assert payload(body) == {"error": "limit is 20 MB"}
+
+
+def test_an_unknown_mode_names_the_two_choices(api) -> None:
+    base, _ = api(service=StubService(document=sample_document()))
+    status, _, body = call(
+        base, "/api/parse", method="POST", body=b"x",
+        headers={"Content-Type": "image/png", "X-Mode": "nope"},
+    )
+    assert status == 400
+    assert payload(body) == {"error": "'nope' is not an extraction mode; use glm or fast"}
+
+
+def test_glm_without_an_endpoint_says_so_and_offers_the_fast_path(api, tmp_path) -> None:
+    base, _ = api(rig=build_rig(tmp_path, glm_available=False))
+    status, _, body = call(
+        base, "/api/parse", method="POST", body=b"x", headers={"Content-Type": "image/png"},
+    )
+    assert status == 503
+    assert payload(body)["error"] == (
+        "GLM-OCR is not configured on this server; use the fast option (LiteParse + Tesseract)"
+    )
+
+
+def test_a_busy_server_asks_the_client_to_retry(api) -> None:
+    base, _ = api(service=StubService(document=sample_document()), slots=FakeSlots(grant=False))
+    status, _, body = call(base, "/api/parse", method="POST", body=b"x",
+                           headers={"Content-Type": "image/png"})
+    assert status == 503
+    assert payload(body) == {"error": "busy, try again in a moment"}
+
+
+def test_the_parse_slot_is_always_released(api) -> None:
+    slots = FakeSlots()
+    base, container = api(service=StubService(error=ConnectionResetError("client went away")),
+                          slots=slots)
+
+    status, _, _ = call(base, "/api/parse", method="POST", body=b"x",
+                        headers={"Content-Type": "image/png"})
+    assert status == 500
+
+    deadline = time.monotonic() + 2
+    while slots.released < slots.acquired and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert slots.released == slots.acquired == 1, "a failed read must not leak its slot"
+
+    container.read_document.override(StubService(document=sample_document()))
+    status, _, _ = call(base, "/api/parse", method="POST", body=b"x",
+                        headers={"Content-Type": "image/png"})
+    assert status == 200, "the next upload must still be served"
+
+
+def test_a_parse_returns_the_evidence_shape(api, png_bytes) -> None:
+    stub = StubService(document=sample_document())
+    base, _ = api(service=stub)
+    status, headers, body = call(
+        base, "/api/parse?mode=fast", method="POST", body=png_bytes,
+        headers={"Content-Type": "image/png; charset=binary", "X-Filename": "form%20one.png"},
+    )
+
+    assert status == 200
+    assert payload(body) == document_evidence(sample_document())
+    assert headers["Access-Control-Allow-Origin"] == "*"
+    source, mode, kwargs = stub.calls[0]
+    assert source.name == "form one.png"
+    assert source.media_type.value == "image/png"
+    assert mode == "fast"
+    assert kwargs["note"] == "uploaded just now · read by LiteParse + Tesseract"
+
+
+def test_a_non_ascii_filename_survives_percent_encoding(api, png_bytes) -> None:
+    stub = StubService(document=sample_document())
+    base, _ = api(service=stub)
+    call(
+        base, "/api/parse", method="POST", body=png_bytes,
+        headers={"Content-Type": "image/png",
+                 "X-Filename": urllib.parse.quote("扫描.pdf", safe="")},
+    )
+    assert stub.calls[0][0].name == "扫描.pdf"
+
+
+def test_no_mode_means_glm(api, png_bytes) -> None:
+    stub = StubService(document=sample_document())
+    base, _ = api(service=stub, glm_base_url="http://stub/v1")
+    status, _, _ = call(base, "/api/parse", method="POST", body=png_bytes,
+                        headers={"Content-Type": "image/png"})
+    assert status == 200
+    assert stub.calls[0][1] == "glm"
+
+
+def test_a_trailing_slash_on_the_endpoint_is_ignored(api) -> None:
+    base, _ = api(glm_base_url="http://stub/v1/")
+    _, _, body = call(base, "/api/health")
+    assert payload(body)["modes"][0]["available"] is True
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_error"),
+    [
+        (EngineUnavailable("no endpoint"), 503, "no endpoint"),
+        (EngineTimeout("the GPU took too long"), 504, "the GPU took too long"),
+        (EngineFailure("bad body"), 502, "bad body"),
+        (CommandTimedOut("pdftoppm timed out"), 504, "parsing took too long"),
+        (ValueError("that upload is empty"), 400, "that upload is empty"),
+        (RuntimeError("boom"), 500, "could not read that file: boom"),
+    ],
+)
+def test_reading_failures_map_to_status_codes(api, png_bytes, error, expected_status,
+                                              expected_error) -> None:
+    base, _ = api(service=StubService(error=error))
+    status, _, body = call(base, "/api/parse", method="POST", body=png_bytes,
+                           headers={"Content-Type": "image/png"})
+    assert status == expected_status
+    assert payload(body) == {"error": expected_error}
+
+
+def test_failure_response_maps_every_error_family() -> None:
+    assert failure_response(CommandTimedOut("x")) == (504, "parsing took too long")
+    assert failure_response(EngineUnavailable("a")) == (503, "a")
+    assert failure_response(EngineTimeout("b")) == (504, "b")
+    assert failure_response(EngineFailure("c")) == (502, "c")
+    assert failure_response(UnknownMode("x", ("glm", "fast")))[0] == 400
+    assert failure_response(ValueError("v")) == (400, "v")
+    assert failure_response(RuntimeError("boom")) == (500, "could not read that file: boom")
+
+
+def test_a_truncated_upload_is_reported_not_parsed(api) -> None:
+    base, _ = api(service=StubService(document=sample_document()))
+    host, port = base.removeprefix("http://").split(":")
+    with socket.create_connection((host, int(port)), timeout=5) as connection:
+        connection.sendall(
+            b"POST /api/parse HTTP/1.1\r\nHost: test\r\nContent-Type: image/png\r\n"
+            b"Content-Length: 100\r\n\r\nonly-ten-b"
+        )
+        connection.shutdown(socket.SHUT_WR)
+        chunks = []
+        while chunk := connection.recv(4096):
+            chunks.append(chunk)
+    response = b"".join(chunks).decode(errors="replace")
+    assert " 408 " in response.splitlines()[0]
+    assert "the upload ended early" in response
+
+
+def test_health_payload_is_built_from_the_registry_and_engines() -> None:
+    from fakes import registry
+
+    health = build_health(registry(), {"glm": _Engine(False), "fast": _Engine(True)},
+                          max_upload_bytes=10, max_pages=2)
+    assert [mode["id"] for mode in health["modes"]] == ["glm", "fast"]
+    assert health["modes"][0]["available"] is False
+    assert health["modes"][0]["name"] == "GLM-OCR"
+    assert health["limits"] == {"bytes": 10, "pages": 2}
+
+
+class _Engine:
+    def __init__(self, available: bool) -> None:
+        self.spec = FAST
+        self._available = available
+
+    @property
+    def available(self) -> bool:
+        return self._available

@@ -30,7 +30,7 @@ Because the directory is bind-mounted, `make publish` is the whole deploy — no
 The upload API is its own container, sharing the hostname under `/api` (Traefik picks the longer rule):
 
 ```bash
-# the context is the repository root: the image carries pipeline.py beside api/server.py
+# the context is the repository root: the image carries ocr_playground/ beside api/server.py
 docker build -t ocr-playground-api:latest -f api/Dockerfile .
 docker run -d --name ocr-playground-api --restart unless-stopped \
   -e GLM_OCR_BASE_URL=https://<workspace>--ocr-playground-glm-ocr-serve.modal.run/v1 \

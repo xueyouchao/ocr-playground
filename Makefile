@@ -1,20 +1,37 @@
 # Everything the playground needs, in the order it needs it.
+#
+# The site build (`pages`, `site`, `serve`) is stdlib-only and runs on the system python. The upload
+# service and the tests need the venv, because the service is wired with python-dependency-injector.
 PY        ?= python3
+VENV      ?= .venv
+VENV_PY   ?= $(VENV)/bin/python
+PYTEST    ?= $(VENV)/bin/pytest
 PORT      ?= 8080
 SITE_DIR  ?= /home/ubuntu/sites/ocr-playground
 COCOINDEX ?= cocoindex
 
-.PHONY: help pages records site serve publish api index clean
+.PHONY: help venv test pages records site serve publish api index clean
 
 help:
+	@echo "make venv     create .venv and install the runtime + test dependencies"
+	@echo "make test     run the suite (offline: no GPU, no LiteParse, no poppler)"
 	@echo "make pages    render corpus/document.pdf -> /tmp/ocr-playground/pages + assets/pages"
 	@echo "make records  re-run a parser (see README); records/ is already populated"
-	@echo "make site     records/ -> evidence.json -> index.html"
+	@echo "make site     records/ -> evidence.json -> index.html (stdlib-only)"
 	@echo "make serve    serve the site on :$(PORT)"
 	@echo "make publish  copy index.html + assets/ to $(SITE_DIR) (see deploy/)"
-	@echo "make api      run the upload service on :8090 (GLM_OCR_BASE_URL=… for GLM-OCR)"
+	@echo "make api      run the upload service on :8090 (needs the venv; GLM_OCR_BASE_URL=… for GLM-OCR)"
 	@echo "make index    read OCR_CORPUS into out/ incrementally (needs requirements-cocoindex.txt)"
 	@echo "make clean    drop evidence.json and index.html"
+
+venv:
+	$(PY) -m venv $(VENV)
+	$(VENV)/bin/pip install --upgrade pip
+	$(VENV)/bin/pip install -r requirements-dev.txt
+
+test:
+	@test -x $(PYTEST) || { echo "run 'make venv' first"; exit 1; }
+	$(PYTEST) -q
 
 pages:
 	$(PY) prepare.py
@@ -24,7 +41,6 @@ pages:
 records:
 	@echo "records/ is populated; re-run one parser from runners/ or modal/ (README 'Run it'), then 'make site'"
 
-
 site:
 	$(PY) collect.py
 	$(PY) build.py
@@ -33,7 +49,8 @@ serve:
 	$(PY) -m http.server $(PORT) --bind 0.0.0.0
 
 api:
-	$(PY) api/server.py --port 8090
+	@test -x $(VENV_PY) || { echo "run 'make venv' first"; exit 1; }
+	$(VENV_PY) api/server.py --port 8090
 
 index:
 	$(COCOINDEX) update main.py

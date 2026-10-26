@@ -144,8 +144,9 @@ different processes:
 
 - **The page** is static files — no server needed, and its images never change, so they cache for a
   year.
-- **The API** is a small stdlib-only Python service. It renders uploads with poppler, then parses
-  them through one of two paths, in its own container behind the same Traefik router at `/api`.
+- **The API** is a small Python service wired with a dependency-injection container. It renders
+  uploads with poppler, then parses them through one of two paths, in its own container behind the
+  same Traefik router at `/api`.
 
 | mode | parser | where | character |
 | --- | --- | --- | --- |
@@ -165,11 +166,11 @@ above, with one system. `GET /api/health` reports which modes this server can ac
 limits; the page reads it to disable GLM-OCR when the deployment has no endpoint, and to select the
 fast path rather than fail the first upload.
 
-**The same pipeline, indexed.** Reading lives in `pipeline.py`; the HTTP handler is a shell around it.
-`indexer/flow.py` is a CocoIndex app over the same functions: walk a directory, memoise each document
-on its content digest, mode, engine identity, page limit and a fingerprint of the reading code, and
-declare `out/documents/<path>.json`,
-`out/pages.jsonl` and `out/summary.json`. A second run with nothing changed reads nothing; editing one
+**The same reading, indexed.** Reading is a use case (`application/read_document.py`); the HTTP
+handler is a shell around it and the indexer is a second caller.
+`interfaces/indexer/flow.py` is a CocoIndex app: walk a directory, memoise each document on its
+content digest, mode, engine identity, page limit and a fingerprint of the reading code, and declare
+`out/documents/<path>.json`, `out/pages.jsonl` and `out/summary.json`. A second run with nothing changed reads nothing; editing one
 file, switching modes or changing the model re-reads exactly the documents that change affects. Across
 the six-page sample plus a PNG, the fast path read seven pages in 21.6 s, and a switch to GLM re-read
 one page after its 156.8 s cold start, producing the same 1,234 characters the upload path shows.
@@ -268,8 +269,16 @@ descriptive statistics — not a leaderboard.
   back a reading while claiming a model that never ran.
 - **CocoIndex for the batch path, not the request path.** Indexing a directory wants memoisation,
   retraction of documents that disappeared, and a run that can be restarted; an upload wants an answer
-  inside one request. Both call the same `pipeline.py`, so the index cannot quietly read a document
-  with a different parser than the demo shows.
+  inside one request. Both call the same use case, so the index cannot quietly read a document with a
+  different parser than the demo shows.
+- **Domain/application/infrastructure, wired by a container.** The reading — document, page, reading
+  stats, engine identity, the errors a bad request deserves — is a domain that imports nothing
+  outside itself; the use case talks to ports, and poppler, ImageMagick, LiteParse and GLM-OCR are
+  adapters behind them. `composition/container.py` is the only file that knows the whole graph, so a
+  test replaces a port and the HTTP handler still runs for real. Cost: the service now needs a
+  compiled package (`dependency-injector`), where before it needed nothing but the stdlib. The static
+  build does not: `collect.py`, `build.py` and `prepare.py` never import the container, so the page
+  still builds on a bare Python — that boundary is now an invariant, not an accident.
 - **Mixed-format cells are handled as mixtures.** Nemotron emits `##` headings around raw `<table>`
   blocks; Chandra emits whole HTML documents. Picking one format per cell mangles the other, so
   block-level HTML is preserved and the Markdown between blocks is converted.
@@ -303,10 +312,18 @@ systems.json             the roster the page renders
 collect.py               records + roster → evidence.json
 build.py                 template.html + evidence.json → index.html
 template.html            the page: rail, page strip, eight panes with find bars, upload panel
-api/server.py            the upload service: GLM-OCR by default, LiteParse + Tesseract for speed
-pipeline.py              the reading shared by that service and the indexer
-main.py                  CocoIndex entry point; indexer/flow.py walks a corpus and declares out/
-requirements-cocoindex.txt  the indexer's one optional dependency, pinned
+ocr_playground/domain/    documents, readings, engine specs, ports, domain errors
+ocr_playground/application/  the read-document use case; the two-slot gate
+ocr_playground/infrastructure/  poppler, ImageMagick, LiteParse, GLM-OCR, settings, fingerprint
+ocr_playground/interfaces/   http/, indexer/, site/, evidence.py
+ocr_playground/composition/  the dependency-injector container
+api/server.py            entry point -> interfaces/http (compatibility shim)
+main.py                  entry point -> interfaces/indexer (CocoIndex needs a file here)
+collect.py build.py prepare.py  entry points -> interfaces/site (compatibility shims)
+docs/architecture.md     the design note: layers, ports, why the container
+tests/                   the offline suite; tests/fakes.py holds the doubles
+requirements.txt         dependency-injector, pinned — the service only
+requirements-cocoindex.txt  the indexer's extra dependency, pinned
 deploy/                  Traefik/nginx notes for this box and any plain host
 ```
 

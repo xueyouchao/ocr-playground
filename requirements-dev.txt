@@ -1,0 +1,5 @@
+# Everything needed to run the suite. The tests are offline: no GPU endpoint, no LiteParse, no
+# poppler. The one end-to-end indexer test skips itself when the optional toolchain is absent.
+-r requirements.txt
+pytest==9.1.1
+ruff==0.17.2
