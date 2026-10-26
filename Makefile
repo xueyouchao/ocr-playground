@@ -11,7 +11,7 @@ help:
 	@echo "make site     records/ -> evidence.json -> index.html"
 	@echo "make serve    serve the site on :$(PORT)"
 	@echo "make publish  copy index.html + assets/ to $(SITE_DIR) (see deploy/)"
-	@echo "make api      run the upload service on :8090"
+	@echo "make api      run the upload service on :8090 (GLM_OCR_BASE_URL=… for GLM-OCR)"
 	@echo "make clean    drop evidence.json and index.html"
 
 pages:

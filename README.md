@@ -8,8 +8,10 @@ a **text** / **preview** toggle per pane: `text` is exactly what the parser emit
 (HTML in a sandboxed iframe, markdown through a small converter).
 
 You can also **read your own document**: a PDF of up to five pages, or a single image (PNG, JPEG,
-TIFF, WebP). It is parsed live on the server by LiteParse + Tesseract — the one system here that fits in
-a couple of seconds per page — and shown in the same layout. Nothing is stored.
+TIFF, WebP), shown in the same layout. **GLM-OCR** is the default — it reads handwriting and tables
+best, but it runs on a scale-to-zero GPU, so the first upload after idle can take several minutes
+while the model boots. **LiteParse + Tesseract** is the fast option: a couple of seconds per page on
+the server's CPU, and visibly weaker on handwriting. Nothing is stored.
 
 The bundled document is
 [`corpus/document.pdf`](corpus/document.pdf) — six pages from a demo corpus: one printed page and five
@@ -48,14 +50,21 @@ make serve          # http://127.0.0.1:8080
 
 `make pages` needs poppler (`pdftoppm`). `make site` needs nothing but Python 3.11+.
 
-The upload service is a separate process; run it beside the page:
+The upload service is a separate process; run it beside the page. GLM-OCR is the default and needs an
+OpenAI-compatible endpoint; without one the server stays up but only the fast path is available:
 
 ```bash
-python api/server.py --port 8090        # health: /api/health, upload: POST /api/parse
+GLM_OCR_BASE_URL=https://<your-modal-app>.modal.run/v1 python api/server.py --port 8090
+python api/server.py --port 8090        # no endpoint: fast (LiteParse + Tesseract) only
 ```
 
-In production it runs as its own container behind the same Traefik router (`deploy/README.md`), which
-is why the page calls `/api/parse` on its own origin.
+`GET /api/health` reports which modes this server can run. `POST /api/parse` takes the file as the
+body and `X-Mode: glm|fast` (or `?mode=fast`); with neither, it uses GLM-OCR. The GLM path is the
+`modal deploy modal/serve_glm_ocr.py` app below — cold after idle, so its first read can take
+minutes; that is the trade the page's method picker is there to explain.
+
+In production the service runs as its own container behind the same Traefik router
+(`deploy/README.md`), which is why the page calls `/api/parse` on its own origin.
 
 Re-running a parser writes its record; then `make site` picks it up:
 
@@ -86,6 +95,10 @@ rsync -av --delete index.html assets user@host:/var/www/ocr-playground/
 
 `deploy/nginx.conf` is a minimal server block with cache headers for the page images. Any static host
 works — the page has no build step, no frameworks, no external requests.
+
+The upload service is a second container. It keeps the CPU toolchain for the fast path, and needs
+`GLM_OCR_BASE_URL` in its environment for the default path; without it, GLM-OCR shows as unavailable
+and the page falls back to LiteParse + Tesseract. `deploy/README.md` has the run command.
 
 ## What the numbers are, and are not
 
@@ -124,7 +137,7 @@ runners/                 one file per CPU parser; _common.py defines the record 
 modal/                   one app per GPU parser, all scale-to-zero
 records/<id>.json        {"page-1": "text…", …} — raw output, never hand-edited
 systems.json             the roster the page renders (name, pipeline, device, how to run)
-api/server.py            the upload service: render, parse, measure, return
+api/server.py            the upload service: GLM-OCR by default, LiteParse + Tesseract for speed
 collect.py               records + roster -> evidence.json
 build.py                 template.html + evidence.json -> index.html
 template.html            the page: source rail, eight panes, text/preview per pane
