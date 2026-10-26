@@ -8,11 +8,13 @@ from __future__ import annotations
 import http.client
 import json
 import socket
+import tempfile
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -83,27 +85,24 @@ def test_health_reports_modes_and_limits(api) -> None:
     assert headers["Content-Type"] == "application/json"
     assert headers["Access-Control-Allow-Origin"] == "*"
     assert headers["Cache-Control"] == "no-store"
-    assert payload(body) == {
-        "ok": True,
-        "default_mode": "glm",
-        "modes": [
-            {
-                "id": "glm",
-                "name": "GLM-OCR",
-                "available": True,
-                "cold_start": True,
-                "detail": "0.9B VLM on a scale-to-zero GPU; the first upload after idle can take minutes",
-            },
-            {
-                "id": "fast",
-                "name": "LiteParse + Tesseract",
-                "available": True,
-                "cold_start": False,
-                "detail": "CPU OCR on this server; a couple of seconds per page",
-            },
-        ],
-        "limits": {"bytes": 20 * 1024 * 1024, "pages": 5},
+    health = payload(body)
+    assert health["ok"] is True
+    assert health["default_mode"] == "glm"
+    modes = {mode["id"]: mode for mode in health["modes"]}
+    assert tuple(modes) == ("glm", "fast", "chandra", "nemotron", "unlimited")
+    assert modes["glm"] == {
+        "id": "glm",
+        "name": "GLM-OCR",
+        "available": True,
+        "cold_start": True,
+        "detail": "0.9B VLM on a scale-to-zero GPU; the first upload after idle takes about 3 minutes",
     }
+    assert modes["fast"]["cold_start"] is False
+    assert modes["fast"]["available"] is True
+    # Endpoints nobody configured: listed, so the page can grey them out rather than fail an upload.
+    assert modes["chandra"]["available"] is False
+    assert {mode["cold_start"] for mode in modes.values()} == {True, False}
+    assert health["limits"] == {"bytes": 20 * 1024 * 1024, "pages": 5}
 
 
 def test_health_admits_when_glm_has_no_endpoint(api) -> None:
@@ -396,3 +395,84 @@ def test_a_warm_request_with_a_body_leaves_the_connection_usable(api):
         connection.close()
 
     assert (first.status, second.status) == (200, 200), second.read()
+
+
+def test_a_rejected_mode_does_not_poison_the_next_request(api):
+    """The parse path can answer before it reads the body; those bytes must not become a request."""
+    base, _ = api(glm_base_url="http://stub/v1")  # chandra has no endpoint here
+    parts = urllib.parse.urlsplit(base)
+    connection = http.client.HTTPConnection(parts.hostname, parts.port, timeout=10)
+    try:
+        connection.request("POST", "/api/parse", body=b"%PDF-1.4 leftover", headers={
+            "Content-Type": "application/pdf", "X-Mode": "chandra", "X-Filename": "x.pdf",
+        })
+        rejected = connection.getresponse()
+        rejected.read()
+        connection.request("GET", "/api/health")
+        after = connection.getresponse()
+        after.read()
+    finally:
+        connection.close()
+
+    assert rejected.status == 503, rejected.status
+    assert after.status == 200, "the next request must not inherit the rejected body"
+
+
+def test_each_mode_names_its_own_engine_when_unconfigured(api):
+    base, _ = api(glm_base_url="http://stub/v1")
+    for mode, name in (("chandra", "Chandra OCR 2"), ("nemotron", "Nemotron 3.5 Parse"),
+                       ("unlimited", "Unlimited-OCR")):
+        status, _, body = call(base, "/api/parse", method="POST", body=b"%PDF", headers={
+            "Content-Type": "application/pdf", "X-Mode": mode, "X-Filename": "x.pdf",
+        })
+        assert status == 503, mode
+        assert name in json.loads(body)["error"]
+        assert "fast option" in json.loads(body)["error"]
+
+
+def test_a_chunked_upload_is_refused_without_poisoning_the_connection(api):
+    """No Content-Length can still mean bytes are coming; the refusal must close, not assume empty."""
+    base, _ = api(glm_base_url="http://stub/v1")
+    parts = urllib.parse.urlsplit(base)
+    connection = http.client.HTTPConnection(parts.hostname, parts.port, timeout=10)
+    try:
+        connection.putrequest("POST", "/api/parse")
+        connection.putheader("Content-Type", "application/pdf")
+        connection.putheader("Transfer-Encoding", "chunked")
+        connection.endheaders()
+        connection.send(b"5\r\n%PDF-\r\n0\r\n\r\n")
+        refused = connection.getresponse()
+        refused.read()
+        connection.request("GET", "/api/health")
+        after = connection.getresponse()
+        after.read()
+    finally:
+        connection.close()
+
+    assert refused.status == 411, refused.status
+    assert after.status == 200
+
+
+def test_a_comma_separated_mode_returns_a_comparison(api):
+    """One upload, several engines: the response carries a system and a cell for each."""
+    base, _ = api(rig=build_rig(Path(tempfile.mkdtemp()), pages=1))
+    status, _, body = call(base, "/api/parse", method="POST", body=b"%PDF", headers={
+        "Content-Type": "application/pdf", "X-Mode": "glm,fast", "X-Filename": "x.pdf",
+    })
+
+    assert status == 200
+    evidence = payload(body)
+    assert [system["id"] for system in evidence["systems"]] == ["glm-ocr", "liteparse-tesseract"]
+    assert set(evidence["pages"][0]["cells"]) == {"glm-ocr", "liteparse-tesseract"}
+    assert evidence["document"]["note"] == (
+        "uploaded just now · read side by side by GLM-OCR + LiteParse + Tesseract"
+    )
+
+
+def test_a_comparison_with_one_unconfigured_engine_is_refused(api):
+    base, _ = api(glm_base_url="http://stub/v1")  # chandra has no endpoint here
+    status, _, body = call(base, "/api/parse", method="POST", body=b"%PDF", headers={
+        "Content-Type": "application/pdf", "X-Mode": "glm,chandra", "X-Filename": "x.pdf",
+    })
+    assert status == 503
+    assert "Chandra OCR 2" in payload(body)["error"]

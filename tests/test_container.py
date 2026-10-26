@@ -76,10 +76,29 @@ def test_the_registry_is_derived_from_the_wired_engines() -> None:
     container = build_container({"GLM_OCR_BASE_URL": "https://gpu.example/v1"})
     registry_ = container.registry()
 
-    assert registry_.modes == ("glm", "fast")
+    assert registry_.modes == ("glm", "fast", "chandra", "nemotron", "unlimited")
     assert registry_.spec("glm").id == "glm-ocr"
     assert registry_.spec("glm").name == "GLM-OCR"
     assert registry_.default_mode == "glm"
+
+
+def test_each_vlm_endpoint_is_its_own_mode() -> None:
+    container = build_container({
+        "GLM_OCR_BASE_URL": "https://glm.example/v1",
+        "CHANDRA_OCR_BASE_URL": "https://chandra.example/v1",
+        "NEMOTRON_PARSE_BASE_URL": "https://nemotron.example/v1",
+        "UNLIMITED_OCR_BASE_URL": "https://unlimited.example/v1",
+    })
+    engines = container.engines()
+
+    assert {mode: engine.available for mode, engine in engines.items()} == {
+        "glm": True, "fast": True, "chandra": True, "nemotron": True, "unlimited": True,
+    }
+    assert engines["chandra"].spec.id == "chandra-2"
+    assert engines["nemotron"].spec.id == "nemotron-parse"
+    assert engines["unlimited"].spec.id == "unlimited-ocr"
+    # The fast path never needs an endpoint, and the GPU modes never run without one.
+    assert build_container({}).engines()["chandra"].available is False
 
 
 def test_singletons_are_shared_and_a_use_case_is_one_instance() -> None:

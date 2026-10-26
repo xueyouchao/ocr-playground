@@ -11,14 +11,31 @@ from collections.abc import Mapping
 from ...domain.engine import EngineRegistry
 from ...domain.ports import PageOcr
 
+_GPU_COLD = "scale-to-zero GPU; the first upload after idle takes about 3 minutes"
+
 MODE_COPY: dict[str, dict[str, object]] = {
     "glm": {
         "cold_start": True,
-        "detail": "0.9B VLM on a scale-to-zero GPU; the first upload after idle can take minutes",
+        "detail": f"0.9B VLM on a {_GPU_COLD}",
     },
     "fast": {
         "cold_start": False,
         "detail": "CPU OCR on this server; a couple of seconds per page",
+    },
+    # Per-page costs measured from the wrappers' own request durations. These differ by an order of
+    # magnitude, which is the point of showing them: a parser that takes a minute a page is a
+    # different choice from one that takes five seconds, and the comparison waits for the slowest.
+    "chandra": {
+        "cold_start": True,
+        "detail": "Chandra 2 on a scale-to-zero GPU; the slowest here, about a minute a page",
+    },
+    "nemotron": {
+        "cold_start": True,
+        "detail": "Nemotron 3.5 Parse on a scale-to-zero GPU; about 5 s a warm page, markdown with tables",
+    },
+    "unlimited": {
+        "cold_start": True,
+        "detail": "Unlimited-OCR on a scale-to-zero GPU; about 45 s a page, crops and stitches long pages",
     },
 }
 

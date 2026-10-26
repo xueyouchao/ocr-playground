@@ -1,5 +1,19 @@
-"""The two live readers, each one adapter behind the same port."""
-from .glm_ocr import GLM_SPEC, GlmOcrEngine
+"""The live readers, each one adapter behind the same port."""
 from .liteparse import FAST_SPEC, LiteParseEngine
+from .vlm import (
+    CHANDRA_SPEC,
+    GLM_SPEC,
+    NEMOTRON_SPEC,
+    UNLIMITED_SPEC,
+    VlmEngine,
+)
 
-__all__ = ["FAST_SPEC", "GLM_SPEC", "GlmOcrEngine", "LiteParseEngine"]
+__all__ = [
+    "CHANDRA_SPEC",
+    "FAST_SPEC",
+    "GLM_SPEC",
+    "NEMOTRON_SPEC",
+    "UNLIMITED_SPEC",
+    "LiteParseEngine",
+    "VlmEngine",
+]

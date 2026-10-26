@@ -22,6 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
 
 from ...application.capacity import SlotsBusy
+from ...application.read_document import reading_note
 from ...application.errors import EngineFailure, EngineTimeout, EngineUnavailable
 from ...composition.container import Container, build_container
 from ...domain.document import SourceDocument
@@ -78,12 +79,21 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write(f"{self.address_string()} {fmt % args}\n")
 
     def _json(self, status: HTTPStatus, body: dict) -> None:
+        # A POST that was answered before its body was read (a rejected mode, a busy slot) must not
+        # leave those bytes in front of the next request on a kept-alive connection. `http.server`
+        # honours close_connection but does not announce it, so the header says so explicitly —
+        # without it the client reuses a socket that is already closed.
+        closing = getattr(self, "_body_read", True) is False
+        if closing:
+            self.close_connection = True
         encoded = json.dumps(body).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(encoded)))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Cache-Control", "no-store")
+        if closing:
+            self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(encoded)
 
@@ -102,7 +112,10 @@ class Handler(BaseHTTPRequestHandler):
     def requested_mode(self) -> str:
         """`?mode=fast` or `X-Mode: fast`; GLM-OCR when neither says otherwise.
 
-        The mode is resolved through the engine registry, so an unknown mode and an unconfigured
+        A comma-separated list (`glm,chandra`) asks for a comparison: the engines read the same
+        pages concurrently and the response carries one system per engine.
+
+        The modes are resolved through the engine registry, so an unknown mode and an unconfigured
         engine are rejected with their own errors rather than a shared 400.
         """
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
@@ -110,9 +123,10 @@ class Handler(BaseHTTPRequestHandler):
             query.get("mode")
             or [self.headers.get("X-Mode") or self.container.settings().default_mode]
         )[0]
-        mode = raw.strip().lower()
-        self.container.read_document().require_mode(mode)
-        return mode
+        modes = [part.strip().lower() for part in raw.split(",") if part.strip()]
+        for mode in modes:
+            self.container.read_document().require_mode(mode)
+        return ",".join(dict.fromkeys(modes))
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path.split("?")[0] == "/api/health":
@@ -141,11 +155,13 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             length = 0
         if length <= 0:
+            self._body_read = True  # nothing was declared, so nothing is left over
             return
         if length > limit:
             self.close_connection = True
             return
         self.rfile.read(length)
+        self._body_read = True
 
     def _warm(self) -> None:
         """Start a cold engine booting on intent, and say whether it started.
@@ -163,6 +179,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json(HTTPStatus.OK, {"warm": self.container.warmer().request(mode).value})
 
     def do_POST(self) -> None:  # noqa: N802
+        self._body_read = False
         if self.path.split("?")[0] == "/api/warm":
             self._warm()
             return
@@ -176,6 +193,9 @@ class Handler(BaseHTTPRequestHandler):
             length = 0
         settings = self.container.settings()
         if length <= 0:
+            # No Content-Length is not necessarily no body: a chunked upload lands here with its
+            # chunks still in the socket, so this rejection closes the connection rather than
+            # leaving them to be parsed as the next request.
             self._json(HTTPStatus.LENGTH_REQUIRED, {"error": "send the file as the request body"})
             return
         if length > settings.max_upload_bytes:
@@ -202,6 +222,7 @@ class Handler(BaseHTTPRequestHandler):
             with self.container.parse_slots().hold():
                 try:
                     payload = self.rfile.read(length)
+                    self._body_read = True
                 except TimeoutError:
                     self._json(HTTPStatus.REQUEST_TIMEOUT, {"error": "the upload stalled; send it again"})
                     return
@@ -213,11 +234,10 @@ class Handler(BaseHTTPRequestHandler):
                     return
 
                 service = self.container.read_document()
-                engine = service.require_mode(mode)
+                engines = [service.require_mode(part) for part in mode.split(",")]
                 document = service.execute(
-                    SourceDocument.accepted(payload, media_type, name),
-                    mode,
-                    note=f"uploaded just now · read by {engine.spec.name}",
+                    SourceDocument.accepted(payload, media_type, name), mode,
+                    note=f"uploaded just now · {reading_note(engines)}",
                 )
                 evidence = document_evidence(document)
         except SlotsBusy:
@@ -230,7 +250,8 @@ class Handler(BaseHTTPRequestHandler):
         # Cold starts are minutes long; one line per upload makes that visible in the service log.
         elapsed = time.monotonic() - started
         sys.stderr.write(
-            f"parsed {document.page_count} page(s) with {document.engine.id} in {elapsed:.1f}s\n"
+            f"parsed {document.page_count} page(s) with "
+            f"{', '.join(engine.id for engine in document.engines)} in {elapsed:.1f}s\n"
         )
         self._json(HTTPStatus.OK, evidence)
 

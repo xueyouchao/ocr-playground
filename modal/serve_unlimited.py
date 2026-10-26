@@ -34,7 +34,7 @@ _state: dict = {}
 
 
 @app.function(image=image, gpu="L4", volumes={"/root/.cache/huggingface": hf_cache},
-              timeout=1800, scaledown_window=300, startup_timeout=2400)
+              timeout=1800, scaledown_window=120, startup_timeout=2400)
 @modal.asgi_app()
 def web():
     from fastapi import FastAPI

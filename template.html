@@ -17,8 +17,6 @@
          font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   h1 { font-size: 26px; line-height: 1.25; margin: 0 0 10px; letter-spacing: -0.01em; }
   .lede { color: var(--soft); max-width: 90ch; margin: 0 0 6px; }
-  .tag { display: inline-block; font: 600 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase;
-         color: var(--accent); background: var(--accent-soft); padding: 6px 9px; border-radius: 999px; margin-bottom: 18px; }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--soft);
        margin: 34px 0 12px; font-weight: 650; }
   button { font: inherit; color: inherit; }
@@ -41,13 +39,18 @@
                      background: var(--accent); color: #fff; cursor: pointer; }
   .uploader button.ghost { background: #fff; color: var(--accent); border-color: var(--line); }
   .uploader button:disabled { opacity: .5; cursor: default; }
-  .modes { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-  .modes button { text-transform: none; letter-spacing: 0; font: 600 11px/1.3 var(--mono);
-                  padding: 7px 10px; border-radius: 7px; border: 1px solid var(--line);
-                  background: #fff; color: var(--soft); text-align: left; }
-  .modes button small { display: block; font: 10.5px/1.35 var(--mono); font-weight: 500; color: var(--soft); }
-  .modes button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
-  .modes button[aria-pressed="true"] small { color: var(--accent); }
+  .modes { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .modes-label { font: 600 10.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase;
+                 color: var(--soft); }
+  .checks { display: flex; gap: 6px; flex-wrap: wrap; }
+  .checks label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+                  font: 600 11.5px/1.3 var(--mono); padding: 6px 10px; border-radius: 7px;
+                  border: 1px solid var(--line); background: #fff; color: var(--soft); }
+  .checks label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft);
+                                     color: var(--accent); }
+  .checks label:has(input:disabled) { opacity: .5; cursor: default; }
+  .checks input { accent-color: var(--accent); margin: 0; }
+  .modes small { flex-basis: 100%; font: 10.5px/1.4 var(--mono); color: var(--soft); min-height: 1.4em; }
   .upload-status { grid-column: 1 / -1; margin: 0; font: 12px var(--mono); color: var(--soft); min-height: 1em; }
   .upload-status.error { color: var(--bad); }
   @media (max-width: 720px) { .uploader { grid-template-columns: 1fr; } .uploader .actions { justify-content: flex-start; } }
@@ -126,7 +129,6 @@
 </head>
 <body>
 
-<span class="tag">Prototype · throwaway</span>
 <h1>OCR-playground (CPU/GPU)</h1>
 <p class="lede">
   Every pane is a parser run the way its own project intends. The baseline is an <b>open-source,
@@ -141,17 +143,19 @@
 <section class="uploader" id="uploader">
   <div>
     <b>Read your own document</b>
-    <span>A PDF (up to 5 pages) or a single image. <b>GLM-OCR</b> is the default and reads handwriting and
-      tables best, but it runs on a scale-to-zero GPU: after the site has been idle, <b>the first upload
-      can take 3 minutes on average</b> while the model boots, before it reads a single page. It then
+    <span>A PDF (up to 5 pages) or a single image. The VLM parsers — <b>GLM-OCR</b> by default — read
+      handwriting and tables best, but each runs on its own scale-to-zero GPU: after it has been idle,
+      <b>the first upload can take 3 minutes on average</b> while the model boots. After that it
       <b>stays warm for 2 minutes after the last request</b>, so <b>another upload inside that window takes
-      about 5 seconds a page</b>. <b>LiteParse + Tesseract</b> is the fast option — a couple of seconds per page on this server's CPU — and visibly
-      weaker on handwriting.</span>
-    <div class="modes" id="modes" role="group" aria-label="extraction method">
-      <button data-mode="glm" aria-pressed="true">GLM-OCR
-        <small>best · cold start, ~3 minutes</small></button>
-      <button data-mode="fast" aria-pressed="false">LiteParse + Tesseract
-        <small>fast · a couple of seconds per page</small></button>
+      about 5 seconds a page</b>. <b>LiteParse + Tesseract</b> is the fast option — a couple of seconds per
+      page on this server's CPU — and visibly weaker on handwriting.</span>
+    <div class="modes" id="modes">
+      <span class="modes-label" id="modes-label">read it with</span>
+      <div class="checks" id="mode-checks" role="group" aria-labelledby="modes-label">
+        <label><input type="checkbox" value="glm" checked><span>GLM-OCR</span></label>
+        <label><input type="checkbox" value="fast"><span>LiteParse + Tesseract</span></label>
+      </div>
+      <small id="mode-detail" aria-live="polite"></small>
     </div>
   </div>
   <div class="actions">
@@ -198,7 +202,7 @@
 
 <script>
 const DATA = __EVIDENCE__;
-const state = { page: 1, view: {}, allPreview: true, uploaded: null, mode: "glm", find: {} };
+const state = { page: 1, view: {}, allPreview: true, uploaded: null, modes: ["glm"], find: {} };
 // The renderers do not care whether the document is the bundled sample or a fresh upload: both
 // arrive in the same shape, so this is the only branch in the page.
 const currentDoc = () => state.uploaded || DATA;
@@ -688,13 +692,13 @@ function renderStrip() {
 function paneContent(system, cell, view, find) {
   const searchable = cell.chars != null && cell.text.trim().length > 0;
   if (cell.chars == null) {
-    return {
-      html: system.runner
+    // A comparison records why an engine did not answer; a recorded run just has no output.
+    const html = cell.error
+      ? `<div class="none">Did not read this page — ${escapeHtml(cell.error)}</div>`
+      : system.runner
         ? `<div class="none">No output recorded. Run <code>${escapeHtml(system.runner)}</code>.</div>`
-        : `<div class="none">No output recorded for this page.</div>`,
-      matches: 0,
-      searchable,
-    };
+        : `<div class="none">No output recorded for this page.</div>`;
+    return { html, matches: 0, searchable };
   }
   if (!cell.text.trim()) {
     return { html: `<div class="none">Produced no text for this page.</div>`, matches: 0, searchable };
@@ -833,9 +837,10 @@ function setFind(systemId, query) {
 function renderFooter() {
   const doc = currentDoc();
   if (state.uploaded) {
-    const system = doc.systems[0];
+    const names = doc.systems.map((system) => system.name).join(" + ");
+    const where = doc.systems.length === 1 ? ` (${doc.systems[0].device})` : "";
     $("footer").textContent = `Your upload, ${doc.pages.length} page${doc.pages.length === 1 ? "" : "s"} · `
-      + `read live by ${system.name} (${system.device}) · nothing is stored.`;
+      + `read live by ${names}${where} · nothing is stored.`;
   } else {
     $("footer").textContent = `${doc.systems.length} parsers on ${doc.pages.length} pages · recorded from each project's own CLI/API on a 4-core CPU box `
       + `(200 dpi page renders) and Modal L4 GPUs · runs are in records/, provenance in systems.json.`;
@@ -897,16 +902,15 @@ $("preview-all").addEventListener("click", () => {
 });
 
 // ---------- read your own document ----------
-// The upload runs on the same origin, behind the same Traefik router (`/api`). There are two
-// extraction paths. GLM-OCR, on a scale-to-zero GPU, is the default and reads handwriting and tables
-// best; after idle it pays a cold start of minutes before the first page comes back. LiteParse +
-// Tesseract, on this server's CPU, answers in seconds. The panel says both of those things, because
-// a demo that looks hung for four minutes without explaining itself is worse than a slower honest one.
+// The upload runs on the same origin, behind the same Traefik router (`/api`). The VLM parsers —
+// GLM-OCR by default, plus the others this host has an endpoint for — run on scale-to-zero GPUs,
+// read handwriting and tables best, and pay a cold start of about three minutes before the first
+// page comes back. LiteParse + Tesseract, on this server's CPU, answers in seconds. The panel says
+// both of those things, because a demo that looks hung for three minutes without explaining itself
+// is worse than a slower honest one.
 
 const UPLOAD_API = "/api/parse";
 const WARM_API = "/api/warm";
-// Optimistic until /api/health says otherwise, so a host without the API behaves as before.
-const MODE_AVAILABLE = { glm: true, fast: true };
 
 function uploadStatus(message, isError) {
   const line = $("upload-status");
@@ -914,25 +918,42 @@ function uploadStatus(message, isError) {
   line.classList.toggle("error", Boolean(isError));
 }
 
-function modeButtons() {
-  return $("modes").querySelectorAll("[data-mode]");
+// The picker is a checkbox group because the server can read the same document with several
+// parsers at once and return them side by side. The list comes from /api/health, so a parser this
+// host has no endpoint for appears labelled and unselectable rather than failing an upload.
+const MODE_AVAILABLE = { glm: true, fast: true };
+const MODE_COLD = { glm: true, fast: false };
+const MODE_NAME = { glm: "GLM-OCR", fast: "LiteParse + Tesseract" };
+const MODE_DETAIL = {};
+
+function modeBoxes() {
+  return [...$("mode-checks").querySelectorAll("input[type=checkbox]")];
 }
 
 // A read that is already running owns the picker: /api/health can resolve after the request went
-// out, and re-enabling the buttons then would only mislabel a request that has already been sent.
+// out, and re-enabling the boxes then would only mislabel a request that has already been sent.
 let uploadBusy = false;
+// Once the visitor has picked a parser, /api/health must not replace that pick.
+let userChoseMode = false;
 
-function applyModes() {
-  for (const button of modeButtons()) {
-    button.setAttribute("aria-pressed", String(state.mode === button.dataset.mode));
-    button.disabled = uploadBusy || !MODE_AVAILABLE[button.dataset.mode];
-  }
+function primaryMode() {
+  return state.modes[0] || "glm";
 }
 
-function modeNote(mode = state.mode) {
-  return mode === "glm"
-    ? "GLM-OCR runs on a scale-to-zero GPU — a cold start takes about 3 minutes on average; LiteParse + Tesseract is the fast option"
-    : "LiteParse + Tesseract runs on this server's CPU — a couple of seconds per page";
+function applyModes() {
+  for (const box of modeBoxes()) {
+    box.checked = state.modes.includes(box.value);
+    box.disabled = uploadBusy || !MODE_AVAILABLE[box.value];
+  }
+  $("mode-detail").textContent = modeNote(state.modes);
+}
+
+function modeNote(modes = state.modes) {
+  if (!modes.length) return "";
+  if (modes.length === 1) return MODE_DETAIL[modes[0]] || "";
+  const cold = modes.filter((mode) => MODE_COLD[mode]).length;
+  return `${modes.length} parsers on the same pages, side by side`
+    + (cold ? ` · ${cold} cold start${cold === 1 ? "" : "s"} to pay` : "");
 }
 
 function setUploadBusy(busy) {
@@ -942,21 +963,45 @@ function setUploadBusy(busy) {
   applyModes();
 }
 
-// The server is the only thing that knows whether a GLM endpoint is configured for it. Ask once on
-// load: with no endpoint, default to fast and say why rather than failing the first upload.
+// The server is the only thing that knows which endpoints this host has. Ask once on load: build a
+// box per mode it reports, check the one it defaults to when that one can run, and explain a
+// fallback instead of failing the first upload.
 async function loadModes() {
   try {
     const response = await fetch("/api/health");
     if (!response.ok) return;
     const health = await response.json();
+    const group = $("mode-checks");
+    group.innerHTML = "";
     for (const mode of health.modes || []) {
-      if (mode.id in MODE_AVAILABLE) MODE_AVAILABLE[mode.id] = mode.available !== false;
+      MODE_AVAILABLE[mode.id] = mode.available !== false;
+      MODE_COLD[mode.id] = mode.cold_start === true;
+      MODE_NAME[mode.id] = mode.name;
+      MODE_DETAIL[mode.id] = mode.detail || "";
+      const label = document.createElement("label");
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.value = mode.id;
+      const name = document.createElement("span");
+      name.textContent = mode.available === false ? `${mode.name} — not configured` : mode.name;
+      label.append(box, name);
+      group.append(label);
     }
-    if (!MODE_AVAILABLE.glm && state.mode === "glm") {
-      state.mode = "fast";
-      // Do not talk over a read that is already running; its status describes the request it sent.
-      if (!uploadBusy) {
-        uploadStatus("GLM-OCR is not configured on this server; using the fast option (LiteParse + Tesseract).");
+    // The server's default only applies to a visitor who has not chosen yet: honouring it later
+    // would quietly undo a pick made while this request was in flight.
+    if (!userChoseMode && MODE_AVAILABLE[health.default_mode]) {
+      state.modes = [health.default_mode];
+    }
+    // Never leave the picker empty or pointing at a parser this host cannot run — the upload would
+    // then send a mode that cannot answer. Filter on MODE_AVAILABLE, not the DOM, which is stale
+    // here: applyModes() has not run yet.
+    state.modes = state.modes.filter((mode) => MODE_AVAILABLE[mode]);
+    if (!state.modes.length) {
+      const fallback = (health.modes || []).find((mode) => MODE_AVAILABLE[mode.id]);
+      if (fallback) state.modes = [fallback.id];
+      if (!MODE_AVAILABLE[health.default_mode] && !uploadBusy) {
+        uploadStatus(`${MODE_NAME[health.default_mode] || "The default parser"} is not configured on `
+          + `this server; using ${MODE_NAME[primaryMode()] || primaryMode()}.`);
       }
     }
     applyModes();
@@ -965,44 +1010,51 @@ async function loadModes() {
   }
 }
 
-// GLM-OCR's container bills GPU time from boot until it scales down, so this fires on intent — the
-// picker choosing GLM, or a pointer or keyboard landing on the uploader — never on page load alone.
-// The server throttles it to one boot per interval and caps the day on top of that; the cooldown here
-// only stops a pointer wandering around the panel from asking twice. It is a cooldown, not a flag,
-// because a page that stays open outlives the GPU: after it has scaled down, the next interaction
-// should be allowed to warm it again.
+// A VLM parser's container bills GPU time from boot until it scales down, so this fires on intent —
+// a box being ticked, or a pointer or keyboard landing on the uploader — never on page load alone,
+// and never for the CPU path. Every cold parser that was ticked is pinged; the server throttles them
+// to one boot per interval and caps the day, so the extras wait for their turn.
 const WARM_COOLDOWN_MS = 60000;
-let warmedAt = 0;
+const warmedAt = {};
 
 function warmGpu() {
-  if (state.mode !== "glm" || !MODE_AVAILABLE.glm) return;
-  if (Date.now() - warmedAt < WARM_COOLDOWN_MS) return;
-  warmedAt = Date.now();
-  // A failed ping clears the cooldown: the GPU may still be cold, so the next interaction tries.
-  fetch(WARM_API, { method: "POST", headers: { "X-Mode": "glm" } }).catch(() => {
-    warmedAt = 0;
-  });
+  for (const mode of state.modes) {
+    if (!MODE_COLD[mode] || !MODE_AVAILABLE[mode]) continue;
+    if (Date.now() - (warmedAt[mode] || 0) < WARM_COOLDOWN_MS) continue;
+    warmedAt[mode] = Date.now();
+    // A failed ping clears the cooldown: the GPU may still be cold, so the next interaction tries.
+    fetch(WARM_API, { method: "POST", headers: { "X-Mode": mode } }).catch(() => {
+      warmedAt[mode] = 0;
+    });
+  }
 }
 
 $("uploader").addEventListener("pointerenter", warmGpu);
 $("uploader").addEventListener("focusin", warmGpu);
 
-$("modes").addEventListener("click", (event) => {
-  const button = event.target.closest("[data-mode]");
-  if (!button || button.disabled) return;
-  state.mode = button.dataset.mode;
+$("mode-checks").addEventListener("change", (event) => {
+  const box = event.target.closest("input[type=checkbox]");
+  if (!box) return;
+  const chosen = modeBoxes().filter((one) => one.checked).map((one) => one.value);
+  if (!chosen.length) {
+    // At least one parser has to stay checked: an empty picker is an upload with nothing to read.
+    box.checked = true;
+    return;
+  }
+  state.modes = chosen;
+  userChoseMode = true;
   applyModes();
   warmGpu();
-  uploadStatus(modeNote(state.mode));
+  uploadStatus(modeNote(state.modes));
 });
 
 async function readUpload(file) {
-  const mode = state.mode;
+  // The request's own parsers, not the picker's: the picker is disabled, but health may still land.
+  const modes = state.modes.slice();
   setUploadBusy(true);
   const started = Date.now();
   const ticker = setInterval(() => {
-    // The request's own mode, not the picker's: the picker is disabled, but health may still land.
-    uploadStatus(`reading ${file.name}… ${Math.round((Date.now() - started) / 1000)}s · ${modeNote(mode)}`);
+    uploadStatus(`reading ${file.name}… ${Math.round((Date.now() - started) / 1000)}s · ${modeNote(modes)}`);
   }, 1000);
   uploadStatus(`reading ${file.name}…`);
   try {
@@ -1011,7 +1063,7 @@ async function readUpload(file) {
       headers: {
         "Content-Type": file.type || "application/octet-stream",
         "X-Filename": encodeURIComponent(file.name),
-        "X-Mode": mode,
+        "X-Mode": modes.join(","),
       },
       body: file,
     });
@@ -1025,11 +1077,19 @@ async function readUpload(file) {
     state.allPreview = true;
     $("back-to-sample").hidden = false;
     const seconds = ((Date.now() - started) / 1000).toFixed(1);
+    const names = body.systems.map((system) => system.name).join(" + ");
+    // An engine that did not answer still occupies a pane; say so here rather than after the scroll.
+    const silent = body.systems.filter(
+      (system) => body.pages[0].cells[system.id].chars == null,
+    ).length;
     uploadStatus(`${file.name} · ${body.document.pages} page${body.document.pages === 1 ? "" : "s"} `
-      + `read in ${seconds}s by ${body.systems[0].name}`);
+      + `read in ${seconds}s by ${names}`
+      + (silent ? ` · ${silent} could not read it` : ""));
     render();
   } catch (error) {
-    const hint = mode === "glm" ? " — or switch to LiteParse + Tesseract, the fast option." : "";
+    const hint = modes.includes("glm")
+      ? " — or tick LiteParse + Tesseract, the fast option."
+      : "";
     uploadStatus(`could not read that file — ${error.message}${hint}`, true);
   } finally {
     clearInterval(ticker);

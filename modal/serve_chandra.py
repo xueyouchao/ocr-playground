@@ -38,7 +38,7 @@ _state: dict = {}
 
 
 @app.function(image=chandra_image, gpu="L4", volumes={"/root/.cache/huggingface": hf_cache},
-              timeout=1800, scaledown_window=300, startup_timeout=2400)
+              timeout=1800, scaledown_window=120, startup_timeout=2400)
 @modal.asgi_app()
 def web():
     from fastapi import FastAPI
@@ -64,6 +64,7 @@ def web():
         from PIL import Image
         from chandra.model.hf import generate_hf, load_model
         from chandra.model.schema import BatchInputItem
+        from chandra.output import parse_markdown
 
         if "model" not in _state:
             _state["model"] = load_model()
@@ -71,7 +72,10 @@ def web():
                          for part in message["content"] if part["type"] == "image_url")
         picture = Image.open(io.BytesIO(base64.b64decode(image_url.split(",", 1)[1]))).convert("RGB")
         result = generate_hf([BatchInputItem(image=picture, prompt_type="ocr_layout")], _state["model"])[0]
-        text = result.raw  # GenerationResult carries raw/html/markdown; raw is the model output
+        # `generate_hf` returns GenerationResult, which carries only `raw`: the model's stream with a
+        # data-bbox wrapper per region. The page shows text, so the package's own converter turns
+        # that into the markdown its card documents — same layout, no literal markup in the cell.
+        text = parse_markdown(result.raw)
         return {"choices": [{"message": {"role": "assistant", "content": text}}]}
 
     return api

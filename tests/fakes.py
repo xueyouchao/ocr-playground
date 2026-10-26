@@ -180,15 +180,23 @@ def build_rig(
     return Rig(service, glm, fast, renderer, preview_encoder, clock, workspace)
 
 
-def sample_document(pages: int = 1, *, text: str = "hello", preview: str | None = "data:x") -> ReadDocument:
+def sample_document(
+    pages: int = 1,
+    *,
+    text: str = "hello",
+    preview: str | None = "data:x",
+    engines: tuple[EngineSpec, ...] = (FAST,),
+) -> ReadDocument:
     return ReadDocument(
         name="form.png",
         note="a note",
-        engine=FAST,
+        engines=engines,
         pages=tuple(
             DocumentPage(
                 number=number,
-                reading=PageReading.of(FAST.id, f"{text} {number}"),
+                readings=tuple(
+                    PageReading.of(engine.id, f"{text} {number}") for engine in engines
+                ),
                 preview=preview,
             )
             for number in range(1, pages + 1)

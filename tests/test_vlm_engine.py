@@ -1,4 +1,4 @@
-"""The GLM-OCR adapter: payload, redirects, budget and the way it names a failure.
+"""The VLM adapter: payload, redirects, budget and the way it names a failure.
 
 A local stub stands in for the Modal endpoint; no GPU and no network.
 """
@@ -14,7 +14,7 @@ import pytest
 
 from ocr_playground.application.errors import EngineFailure, EngineTimeout
 from ocr_playground.domain.document import PageImage
-from ocr_playground.infrastructure.engines.glm_ocr import GlmOcrEngine
+from ocr_playground.infrastructure.engines import GLM_SPEC, VlmEngine
 
 
 class Stub:
@@ -75,7 +75,7 @@ def completion(text: str) -> tuple[int, dict, dict]:
 def endpoint():
     created: list[Stub] = []
 
-    def make(script, **overrides) -> tuple[Stub, GlmOcrEngine]:
+    def make(script, **overrides) -> tuple[Stub, VlmEngine]:
         stub = Stub(script)
         created.append(stub)
         settings = {
@@ -85,7 +85,7 @@ def endpoint():
             "request_timeout": 30,
         }
         settings.update(overrides)
-        return stub, GlmOcrEngine(base_url=stub.url, **settings)
+        return stub, VlmEngine(spec=GLM_SPEC, base_url=stub.url, **settings)
 
     yield make
     for stub in created:
@@ -181,7 +181,7 @@ def test_an_unreachable_endpoint_is_a_timeout(tmp_path) -> None:
         probe.bind(("127.0.0.1", 0))
         dead_port = probe.getsockname()[1]
 
-    engine = GlmOcrEngine(
+    engine = VlmEngine(spec=GLM_SPEC,
         base_url=f"http://127.0.0.1:{dead_port}", model="glm-ocr",
         prompt="Text Recognition:", api_key="k", request_timeout=5,
     )
@@ -190,8 +190,8 @@ def test_an_unreachable_endpoint_is_a_timeout(tmp_path) -> None:
 
 
 def test_availability_is_whether_an_endpoint_is_configured() -> None:
-    def engine(base_url: str) -> GlmOcrEngine:
-        return GlmOcrEngine(base_url=base_url, model="m", prompt="p", api_key="k",
+    def engine(base_url: str) -> VlmEngine:
+        return VlmEngine(spec=GLM_SPEC, base_url=base_url, model="m", prompt="p", api_key="k",
                             request_timeout=1)
 
     assert engine("https://gpu.example/v1").available is True
@@ -199,7 +199,7 @@ def test_availability_is_whether_an_endpoint_is_configured() -> None:
 
 
 def test_identity_names_model_prompt_and_endpoint() -> None:
-    engine = GlmOcrEngine(
+    engine = VlmEngine(spec=GLM_SPEC,
         base_url="https://gpu.example/v1", model="glm-ocr",
         prompt="Text Recognition:", api_key="k", request_timeout=1,
     )
@@ -225,11 +225,11 @@ def test_warm_reports_a_refused_endpoint_instead_of_raising(endpoint):
 
 
 def test_warm_is_false_when_no_endpoint_is_configured():
-    engine = GlmOcrEngine(base_url="", model="m", prompt="p", api_key="k", request_timeout=1)
+    engine = VlmEngine(spec=GLM_SPEC, base_url="", model="m", prompt="p", api_key="k", request_timeout=1)
     assert engine.warm(5) is False
 
 
 def test_warm_is_false_when_the_host_is_unreachable():
-    engine = GlmOcrEngine(base_url="http://127.0.0.1:9/v1", model="m", prompt="p",
+    engine = VlmEngine(spec=GLM_SPEC, base_url="http://127.0.0.1:9/v1", model="m", prompt="p",
                           api_key="k", request_timeout=1)
     assert engine.warm(1) is False  # a dead endpoint must not fail the page that asked

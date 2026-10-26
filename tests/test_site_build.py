@@ -136,3 +136,33 @@ def test_the_page_warms_the_gpu_on_intent_not_on_arrival() -> None:
 
     body = template[template.index("async function loadModes"):]
     assert "warmGpu" not in body[: body.index("\n}\n")], "page load must not start the GPU"
+
+
+def test_the_picker_can_ask_for_a_comparison() -> None:
+    """Several parsers at once: checkboxes, a comma-joined header, and a footer that names them all."""
+    template = (ROOT / "template.html").read_text()
+
+    assert 'id="mode-checks"' in template
+    assert template.count('type="checkbox"') >= 2
+    assert '"X-Mode": modes.join(",")' in template
+    # An empty picker is an upload with nothing to read, so the last box cannot be unticked.
+    assert "box.checked = true;" in template
+    # Each ticked GPU parser is warmed, not just one: a comparison pays every cold start it asked for.
+    assert "for (const mode of state.modes)" in template
+    assert "warmedAt[mode]" in template
+
+
+def test_the_mode_fallback_only_picks_a_parser_that_can_run() -> None:
+    """Two ways the picker could quietly fight the visitor; both are one line each."""
+    template = (ROOT / "template.html").read_text()
+    body = template[template.index("async function loadModes"):]
+    body = body[: body.index("\n}\n")]
+
+    # Every option is still enabled until applyModes() runs, so the DOM cannot answer "what can
+    # this host run" — an unavailable GLM would win and every upload would 503.
+    assert "option.disabled" not in body, "ask MODE_AVAILABLE, not the DOM"
+    assert "find((mode) => MODE_AVAILABLE[mode.id])" in body
+
+    # A /api/health reply that lands after the visitor picked must not undo the pick.
+    assert "if (!userChoseMode && MODE_AVAILABLE[health.default_mode])" in body
+    assert "userChoseMode = true;" in template

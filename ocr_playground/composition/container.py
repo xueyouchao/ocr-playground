@@ -22,7 +22,14 @@ from ..application.read_document import ReadDocumentService
 from ..application.warming import EngineWarmer, WarmPolicy
 from ..domain.engine import EngineRegistry
 from ..domain.ports import PageOcr
-from ..infrastructure.engines import GlmOcrEngine, LiteParseEngine
+from ..infrastructure.engines import (
+    CHANDRA_SPEC,
+    GLM_SPEC,
+    NEMOTRON_SPEC,
+    UNLIMITED_SPEC,
+    LiteParseEngine,
+    VlmEngine,
+)
 from ..infrastructure.fingerprint import reading_fingerprint
 from ..infrastructure.previews import ImageMagickPreviewEncoder
 from ..infrastructure.process import ProcessRunner
@@ -58,8 +65,11 @@ class Container(containers.DeclarativeContainer):
         quality=settings.provided.preview_quality,
     )
 
+    # One adapter, four endpoints. `fast` stays second so the "use the fast option" message a
+    # missing GPU produces is still the one that names the CPU path.
     glm = providers.Singleton(
-        GlmOcrEngine,
+        VlmEngine,
+        spec=GLM_SPEC,
         base_url=settings.provided.glm_base_url,
         model=settings.provided.glm_model,
         prompt=settings.provided.glm_prompt,
@@ -69,7 +79,36 @@ class Container(containers.DeclarativeContainer):
     fast = providers.Singleton(
         LiteParseEngine, runner=process, lit_path=settings.provided.lit_path,
     )
-    engines = providers.Dict(glm=glm, fast=fast)
+    chandra = providers.Singleton(
+        VlmEngine,
+        spec=CHANDRA_SPEC,
+        base_url=settings.provided.chandra_base_url,
+        model="chandra",
+        # Chandras own task name; the wrapper picks prompt_type="ocr_layout" from it.
+        prompt="ocr_layout",
+        api_key=settings.provided.glm_api_key,
+        request_timeout=settings.provided.glm_request_timeout,
+    )
+    nemotron = providers.Singleton(
+        VlmEngine,
+        spec=NEMOTRON_SPEC,
+        base_url=settings.provided.nemotron_base_url,
+        model="nemotron",
+        # The wrapper supplies NVIDIA's control-token prompt; this only names the task.
+        prompt="output_markdown",
+        api_key=settings.provided.glm_api_key,
+        request_timeout=settings.provided.glm_request_timeout,
+    )
+    unlimited = providers.Singleton(
+        VlmEngine,
+        spec=UNLIMITED_SPEC,
+        base_url=settings.provided.unlimited_base_url,
+        model="unlimited-ocr",
+        prompt="document parsing.",
+        api_key=settings.provided.glm_api_key,
+        request_timeout=settings.provided.glm_request_timeout,
+    )
+    engines = providers.Dict(glm=glm, fast=fast, chandra=chandra, nemotron=nemotron, unlimited=unlimited)
 
     registry = providers.Singleton(
         build_registry, engines=engines, default_mode=settings.provided.default_mode,

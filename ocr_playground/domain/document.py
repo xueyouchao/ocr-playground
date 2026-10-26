@@ -67,22 +67,57 @@ class PageLimit:
 
 
 @dataclass(frozen=True, slots=True)
+class PageFailure:
+    """An engine that was asked for this page and did not produce a reading."""
+
+    engine_id: str
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
 class DocumentPage:
-    """One page of the reading, with the preview only when the caller asked for one."""
+    """One page, read by every engine that answered, with the preview when one was asked for.
+
+    `readings` keeps the order the engines were requested in. A comparison therefore does not need
+    every engine to succeed: `failures` names the ones that did not, and a page may carry both.
+    """
 
     number: int
-    reading: PageReading
+    readings: tuple[PageReading, ...]
     preview: str | None = None
+    failures: tuple[PageFailure, ...] = ()
+
+    @property
+    def reading(self) -> PageReading:
+        """The primary reading — the first engine asked for, which is what a single-engine read is."""
+        return self.readings[0]
+
+    def reading_by(self, engine_id: str) -> PageReading | None:
+        return next((one for one in self.readings if one.engine_id == engine_id), None)
+
+    def failure_for(self, engine_id: str) -> str | None:
+        return next(
+            (one.message for one in self.failures if one.engine_id == engine_id), None
+        )
+
+    def __post_init__(self) -> None:
+        if not self.readings and not self.failures:
+            raise ValueError("a page needs a reading or a failure")
 
 
 @dataclass(frozen=True, slots=True)
 class ReadDocument:
-    """The aggregate root: one document, read once, by one engine."""
+    """The aggregate root: one document, read once by each of `engines`, in the order requested."""
 
     name: str
     note: str
-    engine: EngineSpec
+    engines: tuple[EngineSpec, ...]
     pages: tuple[DocumentPage, ...]
+
+    @property
+    def engine(self) -> EngineSpec:
+        """The primary engine — the first one asked for."""
+        return self.engines[0]
 
     @property
     def page_count(self) -> int:
@@ -95,3 +130,5 @@ class ReadDocument:
     def __post_init__(self) -> None:
         if not self.pages:
             raise ValueError("a read document needs at least one page")
+        if not self.engines:
+            raise ValueError("a read document needs at least one engine")
