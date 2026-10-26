@@ -38,7 +38,7 @@ It supports two document sources through one renderer:
 | source | parsed | parsers | shape |
 | --- | --- | --- | --- |
 | the bundled sample | ahead of time | all eight | `evidence.json` |
-| your upload | live, per request | LiteParse + Tesseract | API response |
+| your upload | live, per request | GLM-OCR (default) or LiteParse + Tesseract | API response |
 
 The page has exactly one branch for this — `currentDoc()` returns `state.uploaded || DATA` — because
 the upload service returns the **same evidence shape** the static build produces. That is the central
@@ -142,18 +142,32 @@ different processes:
 
 - **The page** is static files — no server needed, and its images never change, so they cache for a
   year.
-- **The API** is a small stdlib-only Python service that renders with poppler and parses with
-  LiteParse + Tesseract, in its own container behind the same Traefik router at `/api`.
+- **The API** is a small stdlib-only Python service. It renders uploads with poppler, then parses
+  them through one of two paths, in its own container behind the same Traefik router at `/api`.
 
-Contract: `POST /api/parse` with the file as the request body, a `Content-Type`, and an
-`X-Filename` header (percent-encoded — header values are Latin-1, so `扫描.png` cannot ride in one
-verbatim). Response: the evidence shape above, with one system. `GET /api/health` reports the roster
-and the limits.
+| mode | parser | where | character |
+| --- | --- | --- | --- |
+| `glm` (default) | GLM-OCR, a 0.9B VLM | Modal L4, scale-to-zero | best on handwriting and tables; cold start of minutes after idle |
+| `fast` | LiteParse + Tesseract | this server's CPU | ~2 s/page; visibly weaker on the same pages |
 
-**Why only one parser live?** The other seven are GPU-class models or pipelines too heavy to answer
-inside an upload request on a four-core box, and a demo that takes minutes or fails without a key is
-worse than one that answers in seconds. The upload pane is therefore a single pane — the design
-accepts a narrower view in exchange for a live path that always works.
+A warm GLM page took about six seconds in testing, the fast path about two, and the first request
+after idle paid roughly ninety seconds before vLLM answered. The budget is deliberately generous: the
+GPU may need minutes, and a request that gives up early is worse than one that explains itself while
+it waits. The page keeps a running status line with exactly that explanation, and offers the fast
+path beside it.
+
+Contract: `POST /api/parse` with the file as the request body, a `Content-Type`, an `X-Filename`
+header (percent-encoded — header values are Latin-1, so `扫描.png` cannot ride in one verbatim), and
+`X-Mode: glm|fast` (or `?mode=fast`). With no mode it is GLM-OCR. The response is the evidence shape
+above, with one system. `GET /api/health` reports which modes this server can actually run and the
+limits; the page reads it to disable GLM-OCR when the deployment has no endpoint, and to select the
+fast path rather than fail the first upload.
+
+**Why not all eight live?** The other GPU-class models need their own deployments and multi-minute
+cold starts, and the CPU PaddleOCR pipeline is too heavy to answer inside a request on a four-core
+box. Two paths cover the range the page is making a point about — a VLM that reads handwriting, and a
+classic OCR pass that is fast — without turning a demo into a queue. The upload pane is therefore a
+single pane either way.
 
 The security model is "bounds, and nothing on disk":
 
@@ -161,9 +175,10 @@ The security model is "bounds, and nothing on disk":
 | --- | --- | --- |
 | request body | 20 MiB | rejects before reading |
 | pages | 5 | poppler render time is linear |
-| concurrent parses | 2 | box has four cores; each parse is CPU-bound |
+| concurrent parses | 2 | the fast path is CPU-bound; a GLM upload holds its slot while it waits |
 | socket timeout | 30 s | a silent client cannot own a thread |
-| parse timeout | 120 s | per subprocess |
+| fast parse timeout | 120 s | per subprocess |
+| GLM budget | 900 s | cold start plus five pages; the request is held, not dropped |
 | storage | none | temp dir deleted before the response is sent |
 
 The subtle one: the parse slot is acquired **before** the body is read. Otherwise an upload that
@@ -174,6 +189,10 @@ Another: PNG and JPEG uploads are parsed **as uploaded**. The first version roun
 upload through ImageMagick, which rewrote an 8-bit RGB scan as an 8-bit grayscale palette image and
 cost more than half the text — 111 characters instead of 407 on the sample form. Only TIFF and WebP,
 which LiteParse cannot open, take the conversion path.
+
+A third, specific to the VLM path: the image data URL carries the real media type, sniffed from the
+first bytes rather than the filename, because an upload keeps its own bytes and a mislabelled JPEG is
+a `400` from the endpoint rather than a reading.
 
 ## 7. What the runs showed
 
@@ -231,6 +250,11 @@ descriptive statistics — not a leaderboard.
   styles); everything else goes through a converter that escapes before it formats. `srcdoc` is a
   double-quoted attribute, so quotes are escaped too. Extracted figures point at files that were never
   shipped, so `<img>` becomes an "image not shipped" chip instead of a broken-image icon.
+- **GLM-OCR by default, with its cost on the label.** GLM-OCR reads this corpus's handwriting far
+  better than Tesseract, so it is the default path — but it is a scale-to-zero GPU, and the first read
+  after idle waits minutes. Rather than hide that behind a spinner or silently fall back, the panel
+  names both paths, states the trade, and lets the picker choose fast. A silent fallback would hand
+  back a reading while claiming a model that never ran.
 - **Mixed-format cells are handled as mixtures.** Nemotron emits `##` headings around raw `<table>`
   blocks; Chandra emits whole HTML documents. Picking one format per cell mangles the other, so
   block-level HTML is preserved and the Markdown between blocks is converted.
@@ -241,8 +265,10 @@ descriptive statistics — not a leaderboard.
 
 - **No ground truth, therefore no accuracy.** The single highest-value next step: transcribe one page
   by hand, add a per-parser diff, and let the ranking be earned rather than implied.
-- **The upload API is public and unauthenticated.** The caps are the whole defence. Rate limiting is
-  a prerequisite before it points at anything that matters.
+- **The upload API is public and unauthenticated, and so is the GPU endpoint behind it.** The caps
+  are the whole defence on this side; the Modal app accepts anyone who knows its URL. Rate limiting,
+  and a proxy-auth or key on the endpoint, are prerequisites before this points at anything that
+  matters.
 - **Uploads are not reproducible.** Nothing is stored — a privacy choice that also means a user's
   result cannot be audited or shared by link later.
 - **Handwriting is still hard, and the failures are structural.** The interesting errors here are
@@ -262,7 +288,7 @@ systems.json             the roster the page renders
 collect.py               records + roster → evidence.json
 build.py                 template.html + evidence.json → index.html
 template.html            the page: rail, page strip, eight panes, upload panel
-api/server.py            the upload service: render, parse, measure, return
+api/server.py            the upload service: GLM-OCR by default, LiteParse + Tesseract for speed
 deploy/                  Traefik/nginx notes for this box and any plain host
 ```
 
