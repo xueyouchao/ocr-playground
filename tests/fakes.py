@@ -123,6 +123,19 @@ class FakeEngine:
         return self._text if self._text is not None else f"text of page {page.number}"
 
 
+class FakeWarmEngine(FakeEngine):
+    """An engine that can be told to boot before the first page (GLM-OCR on a scale-to-zero GPU)."""
+
+    def __init__(self, spec: EngineSpec, *, available: bool = True, answers: bool = True) -> None:
+        super().__init__(spec, available=available)
+        self.answers = answers
+        self.warm_calls: list[float] = []
+
+    def warm(self, timeout: float = 120) -> bool:
+        self.warm_calls.append(timeout)
+        return self.answers
+
+
 @dataclass
 class Rig:
     service: ReadDocumentService

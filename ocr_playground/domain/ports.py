@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from .document import PageImage, PageLimit, SourceDocument
 from .engine import EngineSpec
@@ -50,6 +50,18 @@ class PageOcr(Protocol):
 
     def read(self, page: PageImage, deadline: float | None) -> str:
         """The page's text. `deadline` is the monotonic time the document must finish by."""
+
+
+@runtime_checkable
+class PreWarmable(Protocol):
+    """An engine whose backend boots lazily, and can be woken ahead of the first page.
+
+    Separate from `PageOcr` because only a remote, scale-to-zero engine has anything to warm: the
+    local OCR stack is ready the moment its subprocess is.
+    """
+
+    def warm(self, timeout: float) -> bool:
+        """Ask the backend to boot. True if it answered inside `timeout`."""
 
 
 class Clock(Protocol):

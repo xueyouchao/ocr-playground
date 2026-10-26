@@ -122,3 +122,14 @@ def test_the_cli_shims_answer_help(shim) -> None:
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert "usage" in result.stdout.lower()
+
+
+def test_the_page_warms_the_gpu_on_intent_not_on_arrival() -> None:
+    """A warm GPU bills from boot until it scales down, so a page view alone must not rent one."""
+    template = (ROOT / "template.html").read_text()
+    assert 'const WARM_API = "/api/warm";' in template
+    assert '"pointerenter", warmGpu' in template
+    assert '"focusin", warmGpu' in template
+
+    body = template[template.index("async function loadModes"):]
+    assert "warmGpu" not in body[: body.index("\n}\n")], "page load must not start the GPU"

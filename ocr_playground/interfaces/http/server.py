@@ -126,7 +126,24 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
+    def _warm(self) -> None:
+        """Start a cold engine booting on intent, and say whether it started.
+
+        Deliberately not on `GET /api/health`: a container bills GPU time from boot until it scales
+        down, so warming every page view would rent a GPU for a trickle of traffic. The page calls
+        this when somebody picks GLM or reaches for the uploader, and the warmer throttles it.
+        """
+        try:
+            mode = self.requested_mode()
+        except Exception as error:  # noqa: BLE001 - an unknown mode or an unset endpoint
+            self._failure(error)
+            return
+        self._json(HTTPStatus.OK, {"warm": self.container.warmer().request(mode).value})
+
     def do_POST(self) -> None:  # noqa: N802
+        if self.path.split("?")[0] == "/api/warm":
+            self._warm()
+            return
         if self.path.split("?")[0] != "/api/parse":
             self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return

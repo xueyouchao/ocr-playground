@@ -903,6 +903,7 @@ $("preview-all").addEventListener("click", () => {
 // a demo that looks hung for four minutes without explaining itself is worse than a slower honest one.
 
 const UPLOAD_API = "/api/parse";
+const WARM_API = "/api/warm";
 // Optimistic until /api/health says otherwise, so a host without the API behaves as before.
 const MODE_AVAILABLE = { glm: true, fast: true };
 
@@ -963,11 +964,26 @@ async function loadModes() {
   }
 }
 
+// GLM-OCR's container bills GPU time from boot until it scales down, so this fires on intent — the
+// picker choosing GLM, or a pointer or keyboard landing on the uploader — never on page load alone.
+// The server throttles it to one boot per interval and caps the day on top of that.
+let warmStarted = false;
+
+function warmGpu() {
+  if (warmStarted || state.mode !== "glm" || !MODE_AVAILABLE.glm) return;
+  warmStarted = true;
+  fetch(WARM_API, { method: "POST", headers: { "X-Mode": "glm" } }).catch(() => {});
+}
+
+$("uploader").addEventListener("pointerenter", warmGpu, { once: true });
+$("uploader").addEventListener("focusin", warmGpu, { once: true });
+
 $("modes").addEventListener("click", (event) => {
   const button = event.target.closest("[data-mode]");
   if (!button || button.disabled) return;
   state.mode = button.dataset.mode;
   applyModes();
+  warmGpu();
   uploadStatus(modeNote(state.mode));
 });
 
