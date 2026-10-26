@@ -142,13 +142,13 @@
   <div>
     <b>Read your own document</b>
     <span>A PDF (up to 5 pages) or a single image. <b>GLM-OCR</b> is the default and reads handwriting and
-      tables best, but it runs on a scale-to-zero GPU: after the site has been idle, <b>the first upload can
-      take several minutes</b> while the model boots, before it reads a single page. <b>LiteParse +
+      tables best, but it runs on a scale-to-zero GPU: after the site has been idle, <b>the first upload
+      can take 3 minutes on average</b> while the model boots, before it reads a single page. <b>LiteParse +
       Tesseract</b> is the fast option — a couple of seconds per page on this server's CPU — and visibly
       weaker on handwriting.</span>
     <div class="modes" id="modes" role="group" aria-label="extraction method">
       <button data-mode="glm" aria-pressed="true">GLM-OCR
-        <small>best · cold start, may take minutes</small></button>
+        <small>best · cold start, ~3 minutes</small></button>
       <button data-mode="fast" aria-pressed="false">LiteParse + Tesseract
         <small>fast · a couple of seconds per page</small></button>
     </div>
@@ -930,7 +930,7 @@ function applyModes() {
 
 function modeNote(mode = state.mode) {
   return mode === "glm"
-    ? "GLM-OCR runs on a scale-to-zero GPU — a cold start can take several minutes; LiteParse + Tesseract is the fast option"
+    ? "GLM-OCR runs on a scale-to-zero GPU — a cold start takes about 3 minutes on average; LiteParse + Tesseract is the fast option"
     : "LiteParse + Tesseract runs on this server's CPU — a couple of seconds per page";
 }
 
