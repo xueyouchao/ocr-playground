@@ -127,14 +127,15 @@
 <body>
 
 <span class="tag">Prototype · throwaway</span>
-<h1>One scanned form, every document parser</h1>
+<h1>OCR-playground (CPU/GPU)</h1>
 <p class="lede">
-  Six pages from the demo corpus: one printed page and five handwritten forms. Each pane is a parser
-  run the way its own project intends — native pipeline where it has one, LiteParse + Tesseract as the baseline.
-  <b>Text</b> is what the parser emitted; <b>preview</b> renders that same output so you can judge it against
-  the page on the left. Each pane has its own find bar: type a word or phrase and every match is marked,
-  counted, and stepped through with Enter / Shift+Enter. A pane that says <b>not run</b> had no endpoint;
-  it is not a failure.
+  Every pane is a parser run the way its own project intends. The baseline is an <b>open-source,
+  text-based CPU pipeline</b> (LiteParse + Tesseract): no GPU, a couple of seconds per page, and a
+  predictable cost, so it is the reference the other panes are read against. The comparison is
+  <b>open-source VLM-based OCR</b> (GLM-OCR, Chandra OCR 2, Nemotron Parse), which reads handwriting and
+  tables noticeably better but needs a GPU. <b>General-purpose vision-language models</b> such as
+  Anthropic's Claude Opus were not chosen: their per-page cost and latency are far higher than either
+  local option, which would make a six-page, every-parser demo slow and expensive to run.
 </p>
 
 <section class="uploader" id="uploader">
@@ -178,7 +179,7 @@
   <main>
     <div class="toolbar" style="margin: 30px 0 12px;">
       <h2 style="margin:0">This page, every parser</h2>
-      <button id="preview-all" aria-pressed="false">preview all</button>
+      <button id="preview-all" aria-pressed="true">preview all</button>
     </div>
     <div class="panes" id="panes"></div>
     <p class="lede" style="margin-top:10px">
@@ -196,7 +197,7 @@
 
 <script>
 const DATA = __EVIDENCE__;
-const state = { page: 1, view: {}, allPreview: false, uploaded: null, mode: "glm", find: {} };
+const state = { page: 1, view: {}, allPreview: true, uploaded: null, mode: "glm", find: {} };
 // The renderers do not care whether the document is the bundled sample or a fresh upload: both
 // arrive in the same shape, so this is the only branch in the page.
 const currentDoc = () => state.uploaded || DATA;
@@ -996,7 +997,7 @@ async function readUpload(file) {
     state.page = 1;
     state.view = {};
     state.find = {};
-    state.allPreview = false;
+    state.allPreview = true;
     $("back-to-sample").hidden = false;
     const seconds = ((Date.now() - started) / 1000).toFixed(1);
     uploadStatus(`${file.name} · ${body.document.pages} page${body.document.pages === 1 ? "" : "s"} `
@@ -1027,7 +1028,7 @@ $("back-to-sample").addEventListener("click", () => {
   state.page = 1;
   state.view = {};
   state.find = {};
-  state.allPreview = false;
+  state.allPreview = true;
   $("back-to-sample").hidden = true;
   $("file").value = "";
   uploadStatus("");
