@@ -5,7 +5,14 @@ you can run again.
 
 Open `index.html` and you get the scanned page on the left and every parser's output on the right, with
 a **text** / **preview** toggle per pane: `text` is exactly what the parser emitted, `preview` renders it
-(HTML in a sandboxed iframe, markdown through a small converter).
+(HTML in a sandboxed iframe with scripts blocked, markdown through a small converter).
+
+Every pane also has its own **find bar**. Type a word or phrase and every occurrence is marked in that
+pane — in `text` and in `preview` alike — with a match count and `‹` / `›` buttons (or Enter /
+Shift+Enter) to step between hits. A query stays with its pane when you change pages, so the same field
+can be looked up in every parser's reading of every page. Matches are literal: punctuation is not a
+pattern, and a run of spaces in the query matches any whitespace, so a phrase still works across a line
+break.
 
 You can also **read your own document**: a PDF of up to five pages, or a single image (PNG, JPEG,
 TIFF, WebP), shown in the same layout. **GLM-OCR** is the default — it reads handwriting and tables
@@ -167,7 +174,7 @@ indexer/flow.py          walk OCR_CORPUS, memoise a read per digest+mode+identit
 requirements-cocoindex.txt  the indexer's one optional dependency, pinned
 collect.py               records + roster -> evidence.json
 build.py                 template.html + evidence.json -> index.html
-template.html            the page: source rail, eight panes, text/preview per pane
+template.html            the page: source rail, eight panes, text/preview + a find bar per pane
 ```
 
 ## Further reading

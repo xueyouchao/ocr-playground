@@ -85,16 +85,33 @@
   .pane header .sub { display: block; font-size: 12px; color: var(--soft); line-height: 1.4; margin-top: 4px; }
   .pane .metrics { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
   .pane .metrics small { font: 11px/1 var(--mono); color: var(--soft); }
-  .tabs { display: flex; gap: 4px; margin-top: 10px; }
+  .pane-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+  .tabs { display: flex; gap: 4px; flex: 0 0 auto; }
   .tabs button { font: 600 11px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase;
                  padding: 6px 9px; border-radius: 6px; border: 1px solid var(--line); background: #fff;
                  color: var(--soft); cursor: pointer; }
   .tabs button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
   .tabs button:disabled { opacity: .45; cursor: default; }
+
+  /* One find bar per pane: the query is pane-local, and it is the pane's text that is searched --
+     the preview is the same output rendered, so its matches are marked too. */
+  .find { display: flex; align-items: center; gap: 4px; flex: 1 1 210px; min-width: 0; }
+  .find input { flex: 1 1 90px; min-width: 0; font: 11px var(--mono); padding: 5px 7px;
+                border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
+  .find input::placeholder { color: #9aa1ad; }
+  .find .hits { font: 10.5px/1 var(--mono); color: var(--soft); min-width: 5.2em;
+                text-align: right; white-space: nowrap; }
+  .find .hits.none { color: var(--bad); }
+  .find .step { font: 600 12px/1 var(--mono); padding: 5px 7px; border-radius: 6px; border: 1px solid var(--line);
+                background: #fff; color: var(--accent); cursor: pointer; }
+  .find .step:disabled { opacity: .4; color: var(--soft); cursor: default; }
+
   .pane .body { font: 12px/1.5 var(--mono); white-space: pre-wrap; overflow: auto; padding: 12px 14px;
                 height: 320px; overflow-wrap: anywhere; word-break: break-word; }
   .pane .none { color: var(--soft); font-style: italic; white-space: normal; }
   .pane iframe { display: block; width: 100%; height: 320px; border: 0; background: #fff; }
+  .pane .body mark { background: #fde68a; color: inherit; border-radius: 2px; padding: 0; }
+  .pane .body mark.current { background: #f5b301; outline: 1px solid #b57f00; }
   .pane .body table { border-collapse: collapse; width: 100%; font: 10.5px/1.3 var(--mono); }
   .pane .body table td { border: 1px solid var(--line); padding: 2px 4px; vertical-align: top; }
 
@@ -115,7 +132,9 @@
   Six pages from the demo corpus: one printed page and five handwritten forms. Each pane is a parser
   run the way its own project intends — native pipeline where it has one, LiteParse + Tesseract as the baseline.
   <b>Text</b> is what the parser emitted; <b>preview</b> renders that same output so you can judge it against
-  the page on the left. A pane that says <b>not run</b> had no endpoint; it is not a failure.
+  the page on the left. Each pane has its own find bar: type a word or phrase and every match is marked,
+  counted, and stepped through with Enter / Shift+Enter. A pane that says <b>not run</b> had no endpoint;
+  it is not a failure.
 </p>
 
 <section class="uploader" id="uploader">
@@ -177,7 +196,7 @@
 
 <script>
 const DATA = __EVIDENCE__;
-const state = { page: 1, view: {}, allPreview: false, uploaded: null, mode: "glm" };
+const state = { page: 1, view: {}, allPreview: false, uploaded: null, mode: "glm", find: {} };
 // The renderers do not care whether the document is the bundled sample or a fresh upload: both
 // arrive in the same shape, so this is the only branch in the page.
 const currentDoc = () => state.uploaded || DATA;
@@ -194,7 +213,8 @@ function escapeAttribute(value) {
 }
 
 // Parser output is untrusted text. HTML is rendered inside a sandboxed iframe (no scripts, own CSS
-// scope); everything else goes through the small markdown converter below, which escapes first.
+// scope); the one extra flag, allow-same-origin, is what lets the find bar scroll a match into view,
+// and scripts stay blocked, so the markup is still inert.
 function isHtml(text) {
   return /<(div|table|p|h[1-6]|img|span|body|html|br)\b/i.test(text);
 }
@@ -342,6 +362,162 @@ function previewDocument(text) {
     + `<body>${body}</body></html>`;
 }
 
+// ---------- finding a value in one pane ----------
+// A pane's search reads the parser's own text, never a rendered copy of it, so a match count is a
+// count of what that parser wrote. The query is literal -- punctuation is not a pattern -- and a run
+// of space matches any whitespace, because these pages are full of line breaks and a phrase like
+// "total alcohol" should still be found across one. Matches are marked, never filtered: the reading
+// around the hit is what you are there to compare.
+const FIND_ESCAPE = /[.*+?^${}()|[\]\\]/g;
+const FIND_STYLE = "background:#fde68a;color:inherit;border-radius:2px";
+const FIND_CURRENT_STYLE = "background:#f5b301;color:inherit;border-radius:2px;outline:1px solid #b57f00";
+
+function findRegex(query) {
+  const text = String(query).trim();
+  if (!text) return null;
+  const pattern = text.replace(FIND_ESCAPE, "\\$&").replace(/\s+/g, "\\s+");
+  return new RegExp(pattern, "gi");
+}
+
+function highlightText(text, query) {
+  const regex = findRegex(query);
+  if (!regex) return { html: escapeHtml(text), count: 0 };
+  let html = "";
+  let cursor = 0;
+  let count = 0;
+  for (const match of text.matchAll(regex)) {
+    html += escapeHtml(text.slice(cursor, match.index));
+    html += `<mark data-hit="${count}">${escapeHtml(match[0])}</mark>`;
+    cursor = match.index + match[0].length;
+    count += 1;
+  }
+  return { html: html + escapeHtml(text.slice(cursor)), count };
+}
+
+// The preview is a rendering of the same text, so a match is marked where it survives rendering.
+// The walker skips style/script/svg text: a hit inside CSS or a diagram is not one a reader can see.
+function highlightPreview(html, query) {
+  const regex = findRegex(query);
+  if (!regex) return { html, count: 0 };
+  // A preview can be a fragment or a whole document (Chandra emits one); DOMParser accepts both and
+  // the parser's own <style> rules survive the round trip.
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      if (!parent || /^(SCRIPT|STYLE|NOSCRIPT|TEXTAREA)$/.test(parent.tagName)) return NodeFilter.FILTER_REJECT;
+      if (parent.closest("svg")) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+
+  let count = 0;
+  for (const node of nodes) {
+    regex.lastIndex = 0;
+    const matches = Array.from(node.nodeValue.matchAll(regex));
+    if (!matches.length) continue;
+    const fragment = doc.createDocumentFragment();
+    let cursor = 0;
+    for (const match of matches) {
+      if (match.index > cursor) fragment.append(node.nodeValue.slice(cursor, match.index));
+      const mark = doc.createElement("mark");
+      mark.textContent = match[0];
+      mark.dataset.hit = String(count);
+      mark.setAttribute("style", FIND_STYLE);
+      fragment.append(mark);
+      cursor = match.index + match[0].length;
+      count += 1;
+    }
+    if (cursor < node.nodeValue.length) fragment.append(node.nodeValue.slice(cursor));
+    node.parentNode.replaceChild(fragment, node);
+  }
+  return { html: "<!doctype html>\n" + doc.documentElement.outerHTML, count };
+}
+
+function findEntry(systemId) {
+  if (!state.find[systemId]) state.find[systemId] = { query: "", active: 0 };
+  return state.find[systemId];
+}
+
+function paneView(systemId) {
+  return state.allPreview ? "preview" : (state.view[systemId] || "text");
+}
+
+function paneElement(systemId) {
+  return $("panes").querySelector(`article.pane[data-system="${CSS.escape(systemId)}"]`);
+}
+
+function marksInPane(pane) {
+  const frame = pane.querySelector("iframe");
+  if (!frame) return Array.from(pane.querySelectorAll(".body mark"));
+  try {
+    // The iframe is sandboxed without scripts but with same-origin, so its marks are readable here.
+    return frame.contentDocument ? Array.from(frame.contentDocument.querySelectorAll("mark")) : [];
+  } catch {
+    return [];
+  }
+}
+
+function findStatus(find, matches, searchable) {
+  const query = find.query.trim();
+  if (!query) return { text: "", none: false, enabled: false };
+  if (!searchable) return { text: "no output", none: true, enabled: false };
+  if (!matches) return { text: "no matches", none: true, enabled: false };
+  return { text: `${Math.min(find.active, matches - 1) + 1}/${matches}`, none: false, enabled: matches > 1 };
+}
+
+function applyCurrentMatch(systemId) {
+  const pane = paneElement(systemId);
+  const entry = state.find[systemId];
+  if (!pane || !entry || !entry.query.trim()) return;
+  const marks = marksInPane(pane);
+  if (!marks.length) return;
+  const index = ((entry.active % marks.length) + marks.length) % marks.length;
+  entry.active = index;
+  const inFrame = Boolean(pane.querySelector("iframe"));
+  marks.forEach((mark, position) => {
+    const current = position === index;
+    mark.classList.toggle("current", current);
+    // A preview carries the parser's own stylesheet, so its current mark is styled inline.
+    if (inFrame) mark.setAttribute("style", current ? FIND_CURRENT_STYLE : FIND_STYLE);
+  });
+  const mark = marks[index];
+  if (inFrame) {
+    mark.scrollIntoView({ block: "center" });
+  } else {
+    const body = pane.querySelector(".body");
+    const box = body.getBoundingClientRect();
+    const rect = mark.getBoundingClientRect();
+    body.scrollTop += rect.top - box.top - (box.height - rect.height) / 2;
+  }
+}
+
+function paintFindStatus(pane, systemId, matches, searchable) {
+  const status = findStatus(findEntry(systemId), matches, searchable);
+  const hits = pane.querySelector(`[data-hits="${CSS.escape(systemId)}"]`);
+  const previous = pane.querySelector(`[data-find-prev="${CSS.escape(systemId)}"]`);
+  const next = pane.querySelector(`[data-find-next="${CSS.escape(systemId)}"]`);
+  if (hits) {
+    hits.textContent = status.text;
+    hits.classList.toggle("none", status.none);
+  }
+  if (previous) previous.disabled = !status.enabled;
+  if (next) next.disabled = !status.enabled;
+}
+
+function stepMatch(systemId, direction) {
+  const pane = paneElement(systemId);
+  const entry = state.find[systemId];
+  if (!pane || !entry || !entry.query.trim()) return;
+  const matches = marksInPane(pane).length;
+  if (!matches) return;
+  entry.active = ((entry.active + direction) % matches + matches) % matches;
+  paintFindStatus(pane, systemId, matches, true);
+  applyCurrentMatch(systemId);
+}
+
 function pageOf(number) {
   return currentDoc().pages.find((page) => page.page === number);
 }
@@ -369,6 +545,37 @@ function renderStrip() {
   }).join("");
 }
 
+// The pane's body is a function of (system, cell, view, query), so a full render and the in-place
+// repaint a find bar needs cannot drift: they build the same markup through this one call.
+function paneContent(system, cell, view, find) {
+  const searchable = cell.chars != null && cell.text.trim().length > 0;
+  if (cell.chars == null) {
+    return {
+      html: system.runner
+        ? `<div class="none">No output recorded. Run <code>${escapeHtml(system.runner)}</code>.</div>`
+        : `<div class="none">No output recorded for this page.</div>`,
+      matches: 0,
+      searchable,
+    };
+  }
+  if (!cell.text.trim()) {
+    return { html: `<div class="none">Produced no text for this page.</div>`, matches: 0, searchable };
+  }
+  if (view === "preview") {
+    const marked = highlightPreview(previewDocument(cell.text), find.query);
+    // `allow-same-origin` lets the find bar reach the frame's marks and scroll the current one into
+    // view. Scripts, forms and top navigation remain blocked, so the parser's markup stays inert.
+    return {
+      html: `<iframe sandbox="allow-same-origin" title="${escapeAttribute(system.name)} rendered output" `
+        + `srcdoc="${escapeAttribute(marked.html)}"></iframe>`,
+      matches: marked.count,
+      searchable,
+    };
+  }
+  const marked = highlightText(cell.text, find.query);
+  return { html: marked.html, matches: marked.count, searchable };
+}
+
 function renderPanes() {
   const page = pageOf(state.page);
   $("panes").innerHTML = currentDoc().systems.map((system) => {
@@ -381,33 +588,92 @@ function renderPanes() {
         + `<small>${cell.tokens.toLocaleString()} tokens · ${Math.round(cell.numeric_share * 100)}% numbers</small>`
       : `<span class="badge mid">not run</span><small>${escapeHtml(system.needs)}</small>`;
 
-    const view = state.allPreview ? "preview" : (state.view[system.id] || "text");
-    const canPreview = ran && cell.text.trim().length > 0;
-
-    let body;
-    if (!ran) body = `<div class="none">No output recorded. Run <code>${escapeHtml(system.runner)}</code>.</div>`;
-    else if (!cell.text.trim()) body = `<div class="none">Produced no text for this page.</div>`;
-    else if (view === "preview") {
-      body = `<iframe sandbox="" title="${escapeAttribute(system.name)} rendered output" `
-        + `srcdoc="${escapeAttribute(previewDocument(cell.text))}"></iframe>`;
-    } else body = escapeHtml(cell.text);
-
+    const view = paneView(system.id);
+    const find = findEntry(system.id);
+    const content = paneContent(system, cell, view, find);
+    // A cell that produced no text has nothing to render and nothing to search.
+    const canPreview = content.searchable;
+    const status = findStatus(find, content.matches, content.searchable);
     const flush = view === "preview" && canPreview ? ' style="padding:0;white-space:normal"' : "";
+    const stepDisabled = status.enabled ? "" : "disabled";
+    const id = escapeAttribute(system.id);
 
-    return `<article class="pane">
+    return `<article class="pane" data-system="${id}">
       <header>
         <div class="title"><b>${escapeHtml(system.name)}</b><span class="kind">${escapeHtml(system.kind)}</span></div>
         <span class="sub">${escapeHtml(system.pipeline)}</span>
         <span class="sub"><span class="kind">${escapeHtml(system.device)}</span></span>
         <div class="metrics">${metrics}</div>
-        <div class="tabs" role="group" aria-label="how to show ${escapeHtml(system.name)}">
-          <button data-view="text" data-system="${system.id}" aria-pressed="${view === "text"}">text</button>
-          <button data-view="preview" data-system="${system.id}" aria-pressed="${view === "preview"}" ${canPreview ? "" : "disabled"}>preview</button>
+        <div class="pane-tools">
+          <div class="tabs" role="group" aria-label="how to show ${escapeAttribute(system.name)}">
+            <button data-view="text" data-system="${id}" aria-pressed="${view === "text"}">text</button>
+            <button data-view="preview" data-system="${id}" aria-pressed="${view === "preview"}" ${canPreview ? "" : "disabled"}>preview</button>
+          </div>
+          <div class="find" role="group" aria-label="find in ${escapeAttribute(system.name)}">
+            <input type="search" data-find="${id}" value="${escapeAttribute(find.query)}" placeholder="find in this pane"
+                   aria-label="find in ${escapeAttribute(system.name)}" autocomplete="off" spellcheck="false">
+            <span class="hits${status.none ? " none" : ""}" data-hits="${id}" role="status" aria-live="polite">${escapeHtml(status.text)}</span>
+            <button type="button" class="step" data-find-prev="${id}" aria-label="previous match in ${escapeAttribute(system.name)}" ${stepDisabled}>‹</button>
+            <button type="button" class="step" data-find-next="${id}" aria-label="next match in ${escapeAttribute(system.name)}" ${stepDisabled}>›</button>
+          </div>
         </div>
       </header>
-      <div class="body"${flush}>${body}</div>
+      <div class="body"${flush}>${content.html}</div>
     </article>`;
   }).join("");
+  for (const pane of $("panes").querySelectorAll("article.pane")) {
+    wirePane(pane, pane.dataset.system);
+  }
+}
+
+// An iframe's srcdoc loads after innerHTML returns, and a cached document can be complete before
+// the listener is attached; both paths have to end in the current match being scrolled into view.
+function wirePane(pane, systemId) {
+  const frame = pane.querySelector("iframe");
+  if (!frame) {
+    applyCurrentMatch(systemId);
+    return;
+  }
+  frame.addEventListener("load", () => applyCurrentMatch(systemId));
+  if (frame.contentDocument && frame.contentDocument.readyState === "complete") {
+    applyCurrentMatch(systemId);
+  }
+}
+
+// Repaint one pane without rebuilding its header, so the find input keeps focus and its caret while
+// the user types. Everything else (page, view, preview-all, upload) goes through render().
+function paintPane(systemId) {
+  const pane = paneElement(systemId);
+  if (!pane) return;
+  const system = currentDoc().systems.find((candidate) => candidate.id === systemId);
+  const cell = pageOf(state.page).cells[systemId];
+  if (!system || !cell) return;
+  const find = findEntry(systemId);
+  const view = paneView(systemId);
+  const content = paneContent(system, cell, view, find);
+  const body = pane.querySelector(".body");
+  if (view === "preview" && content.searchable) {
+    body.setAttribute("style", "padding:0;white-space:normal");
+  } else {
+    body.removeAttribute("style");
+  }
+  body.innerHTML = content.html;
+  paintFindStatus(pane, systemId, content.matches, content.searchable);
+  wirePane(pane, systemId);
+}
+
+const pendingPaints = new Map();
+
+function setFind(systemId, query) {
+  state.find[systemId] = { query, active: 0 };
+  clearTimeout(pendingPaints.get(systemId));
+  // Replacing a preview's srcdoc reloads the frame, so wait for a pause in typing rather than
+  // reload a long table on every key; highlighting text is cheap enough to do immediately.
+  if (paneView(systemId) === "preview") {
+    pendingPaints.set(systemId, setTimeout(() => paintPane(systemId), 150));
+  } else {
+    paintPane(systemId);
+  }
 }
 
 function renderFooter() {
@@ -427,6 +693,9 @@ $("strip").addEventListener("click", (event) => {
   const chip = event.target.closest("[data-page]");
   if (!chip) return;
   state.page = Number(chip.dataset.page);
+  // A query is worth keeping across pages -- the same field is what you look for in each reading --
+  // but its match position on the new page is not the old one's, so it starts from the first hit.
+  for (const entry of Object.values(state.find)) entry.active = 0;
   render();
 });
 
@@ -436,6 +705,35 @@ $("panes").addEventListener("click", (event) => {
   state.allPreview = false;
   state.view[button.dataset.system] = button.dataset.view;
   render();
+});
+
+$("panes").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-find-prev], [data-find-next]");
+  if (!button || button.disabled) return;
+  const systemId = button.dataset.findPrev || button.dataset.findNext;
+  stepMatch(systemId, button.dataset.findNext ? 1 : -1);
+});
+
+$("panes").addEventListener("input", (event) => {
+  const input = event.target.closest("[data-find]");
+  if (!input) return;
+  setFind(input.dataset.find, input.value);
+});
+
+$("panes").addEventListener("keydown", (event) => {
+  const input = event.target.closest("[data-find]");
+  if (!input) return;
+  const systemId = input.dataset.find;
+  if (event.key === "Enter") {
+    event.preventDefault();
+    stepMatch(systemId, event.shiftKey ? -1 : 1);
+  } else if (event.key === "Escape") {
+    // The native clear button on a search input does not fire in every browser; Escape does.
+    event.preventDefault();
+    input.value = "";
+    setFind(systemId, "");
+    input.focus();
+  }
 });
 
 $("preview-all").addEventListener("click", () => {
@@ -545,6 +843,7 @@ async function readUpload(file) {
     state.uploaded = body;
     state.page = 1;
     state.view = {};
+    state.find = {};
     state.allPreview = false;
     $("back-to-sample").hidden = false;
     const seconds = ((Date.now() - started) / 1000).toFixed(1);
@@ -575,6 +874,7 @@ $("back-to-sample").addEventListener("click", () => {
   state.uploaded = null;
   state.page = 1;
   state.view = {};
+  state.find = {};
   state.allPreview = false;
   $("back-to-sample").hidden = true;
   $("file").value = "";
@@ -583,6 +883,9 @@ $("back-to-sample").addEventListener("click", () => {
 });
 
 function render() {
+  // A debounced preview repaint belongs to the view that was on screen when it was scheduled.
+  for (const timer of pendingPaints.values()) clearTimeout(timer);
+  pendingPaints.clear();
   renderRail();
   renderStrip();
   renderPanes();
