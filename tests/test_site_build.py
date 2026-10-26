@@ -199,3 +199,16 @@ def test_the_night_theme_reaches_into_the_previews() -> None:
     # The marks inside a frame are inline styles: `color: inherit` would be light text on a light mark.
     assert "FIND_MARKS" in template
     assert "color:#fff6d8" in template
+
+
+def test_a_refused_storage_write_cannot_freeze_the_toggle() -> None:
+    """The applied theme is held in memory; storage is only how it survives a reload."""
+    template = (ROOT / "template.html").read_text()
+    body = template[template.index("function currentTheme"):]
+    body = body[: body.index("\n}\n")]
+
+    # Reading the theme back out of storage would answer with the OS preference whenever a write was
+    # refused -- the page changes, the previews keep the old palette, and every click asks for the
+    # same theme again.
+    assert "chosenTheme" in body, "the current theme must not be read back from storage"
+    assert "localStorage" not in body

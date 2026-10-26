@@ -271,8 +271,14 @@ function storedTheme() {
   }
 }
 
+// What the visitor picked this visit. Storage is how a pick survives a reload, never the place the
+// current theme is read back from: if a write is refused, asking storage again would answer with the
+// OS preference, and every use of it -- the previews' palette, the marks, the next click -- would
+// disagree with the page it was painted on.
+let chosenTheme = null;
+
 function currentTheme() {
-  return storedTheme() || (prefersDark() ? "dark" : "light");
+  return chosenTheme || storedTheme() || (prefersDark() ? "dark" : "light");
 }
 
 function applyTheme(theme) {
@@ -286,10 +292,11 @@ function applyTheme(theme) {
 // the theme has to rebuild them or six panes of white paper sit in the middle of a dark page.
 $("theme").addEventListener("click", () => {
   const next = currentTheme() === "dark" ? "light" : "dark";
+  chosenTheme = next;
   try {
     localStorage.setItem(THEME_KEY, next);
   } catch {
-    // nothing to remember it with
+    // Nothing to remember it with; this visit still toggles, and the next one starts from the OS.
   }
   applyTheme(next);
   render();
@@ -1248,7 +1255,7 @@ function render() {
 // with it. Once there is a stored choice, the OS is no longer the authority.
 if (window.matchMedia) {
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-    if (storedTheme()) return;
+    if (chosenTheme || storedTheme()) return;
     applyTheme(prefersDark() ? "dark" : "light");
     render();
   });
