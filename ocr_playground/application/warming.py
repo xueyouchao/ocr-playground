@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sys
 import threading
+from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -46,9 +47,13 @@ def _in_background(job: Callable[[], None]) -> None:
 
 
 class EngineWarmer:
-    """Starts a lazy engine booting: at most once per interval, at most `daily_cap` times a day.
+    """Starts a lazy engine booting: once per interval, at most `daily_cap` times in any 24 hours.
 
-    State is per process and survives for its lifetime; a restart forgets the counters, which is the
+    The cap keeps the starts themselves, not a counter, so a start at midnight and a start a second
+    before it are both still counted later in the day; a counter that resets at a fixed boundary
+    would allow twice the ceiling across that boundary.
+
+    State is per process and survives for its lifetime; a restart forgets the starts, which is the
     right failure direction for a demo (it can only warm once more than intended, never fewer).
     """
 
@@ -67,8 +72,7 @@ class EngineWarmer:
         self._policy = policy
         self._submit = submit
         self._last_started: float | None = None
-        self._window_start: float | None = None
-        self._warmed_in_window = 0
+        self._starts: deque[float] = deque()
 
     def request(self, mode: str) -> WarmStatus:
         """Decide whether to warm `mode` now, and start it. Never blocks on the endpoint."""
@@ -82,15 +86,15 @@ class EngineWarmer:
             return WarmStatus.NOT_WARMABLE
 
         now = self._clock.monotonic()
-        if self._window_start is None or now - self._window_start >= ONE_DAY:
-            self._window_start, self._warmed_in_window = now, 0
-        if self._warmed_in_window >= self._policy.daily_cap:
+        while self._starts and now - self._starts[0] >= ONE_DAY:
+            self._starts.popleft()
+        if len(self._starts) >= self._policy.daily_cap:
             return WarmStatus.CAPPED
         if self._last_started is not None and now - self._last_started < self._policy.min_interval_seconds:
             return WarmStatus.THROTTLED
 
         self._last_started = now
-        self._warmed_in_window += 1
+        self._starts.append(now)
         self._submit(lambda: self._warm(engine))
         return WarmStatus.STARTED
 

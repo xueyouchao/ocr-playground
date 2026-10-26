@@ -126,6 +126,27 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
+    def _discard_body(self, limit: int = 8192) -> None:
+        """Take whatever a client sent with the warm request, so nothing is left for the next one.
+
+        The endpoint takes no body, but `protocol_version` is HTTP/1.1: unread bytes sit in front of
+        the next request line on a kept-alive connection and break it. A body too large to drain
+        cheaply is answered by closing the connection instead.
+        """
+        if (self.headers.get("Transfer-Encoding") or "").lower() == "chunked":
+            self.close_connection = True
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if length <= 0:
+            return
+        if length > limit:
+            self.close_connection = True
+            return
+        self.rfile.read(length)
+
     def _warm(self) -> None:
         """Start a cold engine booting on intent, and say whether it started.
 
@@ -133,6 +154,7 @@ class Handler(BaseHTTPRequestHandler):
         down, so warming every page view would rent a GPU for a trickle of traffic. The page calls
         this when somebody picks GLM or reaches for the uploader, and the warmer throttles it.
         """
+        self._discard_body()
         try:
             mode = self.requested_mode()
         except Exception as error:  # noqa: BLE001 - an unknown mode or an unset endpoint

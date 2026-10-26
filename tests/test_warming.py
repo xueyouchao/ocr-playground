@@ -94,7 +94,20 @@ def test_the_day_has_a_hard_ceiling():
     assert len(harness.jobs) == 2
 
 
-def test_the_ceiling_is_a_rolling_day_not_a_calendar_one():
+def test_the_ceiling_counts_any_24_hours_not_a_calendar_day():
+    """A counter that resets at a fixed boundary allows twice the ceiling across it."""
+    harness = Harness(FakeWarmEngine(GLM), min_interval_seconds=0, daily_cap=2)
+    assert harness.warmer.request("glm") == WarmStatus.STARTED  # t0
+    harness.clock.now += 86_000
+    assert harness.warmer.request("glm") == WarmStatus.STARTED  # t0 + 23h20m, still inside the day
+    assert harness.warmer.request("glm") == WarmStatus.CAPPED
+
+    harness.clock.now += 401  # t0 has aged out; t1 has not
+    assert harness.warmer.request("glm") == WarmStatus.STARTED
+    assert harness.warmer.request("glm") == WarmStatus.CAPPED
+
+
+def test_an_idle_day_clears_the_ceiling_completely():
     harness = Harness(FakeWarmEngine(GLM), min_interval_seconds=0, daily_cap=1)
     harness.warmer.request("glm")
     assert harness.warmer.request("glm") == WarmStatus.CAPPED

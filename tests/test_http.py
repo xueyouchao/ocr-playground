@@ -5,6 +5,7 @@ rather than which function the handler happened to call.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import socket
 import threading
@@ -375,3 +376,23 @@ def test_warming_an_unconfigured_engine_is_refused(api):
     status, _, body = call(base, "/api/warm", method="POST")
     assert status == 503
     assert "not configured" in json.loads(body)["error"]
+
+
+def test_a_warm_request_with_a_body_leaves_the_connection_usable(api):
+    """HTTP/1.1 keeps the connection alive, so an unread body would become the next request line."""
+    base, container = api(glm_base_url="http://127.0.0.1:9/v1")
+    container.warmer.override(warmer_for(FakeWarmEngine(GLM), []))
+    parts = urllib.parse.urlsplit(base)
+    connection = http.client.HTTPConnection(parts.hostname, parts.port, timeout=10)
+    headers = {"Content-Type": "application/json", "X-Mode": "glm"}
+    try:
+        connection.request("POST", "/api/warm", body=b'{"eager": true}', headers=headers)
+        first = connection.getresponse()
+        first.read()
+        connection.request("POST", "/api/warm", body=b'{"eager": true}', headers=headers)
+        second = connection.getresponse()
+        second.read()
+    finally:
+        connection.close()
+
+    assert (first.status, second.status) == (200, 200), second.read()

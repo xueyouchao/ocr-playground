@@ -130,6 +130,9 @@ def test_the_page_warms_the_gpu_on_intent_not_on_arrival() -> None:
     assert 'const WARM_API = "/api/warm";' in template
     assert '"pointerenter", warmGpu' in template
     assert '"focusin", warmGpu' in template
+    # A cooldown, not a one-shot flag: the page outlives the GPU, and the next visit must warm again.
+    assert "WARM_COOLDOWN_MS" in template
+    assert "warmGpu, { once: true }" not in template
 
     body = template[template.index("async function loadModes"):]
     assert "warmGpu" not in body[: body.index("\n}\n")], "page load must not start the GPU"
