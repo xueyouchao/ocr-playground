@@ -36,7 +36,7 @@ def test_the_note_defaults_to_the_engine_name(tmp_path, png_bytes) -> None:
     assert rig.service.execute(source(png_bytes), "fast", note="a note").note == "a note"
 
 
-def test_the_default_mode_is_glm_and_reads_through_glm(tmp_path, png_bytes) -> None:
+def test_glm_reads_through_glm(tmp_path, png_bytes) -> None:
     rig = build_rig(tmp_path, pages=1)
     rig.service.execute(source(png_bytes), "glm")
     assert len(rig.glm.reads) == 1

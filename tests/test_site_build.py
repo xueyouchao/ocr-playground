@@ -43,6 +43,20 @@ def build_site(tmp_path: Path, records: dict[str, dict[str, str | None]]) -> Pat
     return tmp_path
 
 
+def test_the_offline_comparison_opens_with_chandra_and_nemotron() -> None:
+    systems = json.loads((ROOT / "systems.json").read_text(encoding="utf-8"))
+
+    assert [system["id"] for system in systems[:2]] == ["chandra-2", "nemotron-parse"]
+
+
+def test_the_two_cpu_systems_render_last() -> None:
+    systems = json.loads((ROOT / "systems.json").read_text(encoding="utf-8"))
+
+    assert [system["id"] for system in systems[-2:]] == [
+        "liteparse-tesseract", "paddleocr-structure",
+    ]
+
+
 def test_evidence_joins_records_against_the_roster(tmp_path) -> None:
     out = build_site(tmp_path, {
         "a": {"page-1": "one"},
@@ -159,7 +173,7 @@ def test_the_mode_fallback_only_picks_a_parser_that_can_run() -> None:
     body = body[: body.index("\n}\n")]
 
     # Every option is still enabled until applyModes() runs, so the DOM cannot answer "what can
-    # this host run" — an unavailable GLM would win and every upload would 503.
+    # this host run" — an unavailable default would win and every upload would 503.
     assert "option.disabled" not in body, "ask MODE_AVAILABLE, not the DOM"
     assert "find((mode) => MODE_AVAILABLE[mode.id])" in body
 

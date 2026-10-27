@@ -21,12 +21,12 @@ preview panes are separate documents, so they are re-rendered in the same palett
 left glowing in the middle of a dark page, and find marks keep a readable text colour at night.
 
 You can also **read your own document**: a PDF of up to five pages, or a single image (PNG, JPEG,
-TIFF, WebP), shown in the same layout. **GLM-OCR** is the default — it reads handwriting and tables
-best, but it runs on a scale-to-zero GPU, so the first upload after idle takes about three minutes
-while the model boots — it then stays warm for two minutes after the last request, so another
-upload inside that window takes about five seconds a page. **LiteParse + Tesseract** is the fast option: a couple of seconds per page on
-the server's CPU, and visibly weaker on handwriting. The picker also lists every other GPU parser
-this deployment has an endpoint for — Chandra, Nemotron, Unlimited-OCR, MinerU and
+TIFF, WebP), shown in the same layout. **Chandra OCR 2** is the default — it returns layout-rich
+markdown with tables, at about a minute a page, and it runs on a scale-to-zero GPU, so the first
+upload after idle also waits for boot. **GLM-OCR** is the faster warm path (about five seconds a page)
+and reads handwriting best. **LiteParse + Tesseract** is the fast option: a couple of seconds per page
+on the server's CPU, and visibly weaker on handwriting. The picker also lists every other GPU parser
+this deployment has an endpoint for — GLM, Nemotron, Unlimited-OCR, MinerU and
 **PP-StructureV3 (GPU)** — and several can be ticked to read the same pages side by side. Nothing is
 stored.
 
@@ -45,14 +45,14 @@ pass. Hence this shootout: what do the parsers that actually look at the pixels 
 
 | system | pipeline | runs where |
 |---|---|---|
-| LiteParse + Tesseract | raster + bundled Tesseract | CPU |
-| PaddleOCR PP-StructureV3 | layout → OCR → tables → order, mobile models | CPU |
+| Chandra OCR 2 (default) | datalab VLM | Modal L4 |
+| Nemotron 3.5 Parse | NVIDIA VLM + the repo's own postprocessing | Modal L4 |
+| GLM-OCR | 0.9B VLM | Modal L4 (vLLM) |
+| Unlimited-OCR | tiled VLM | Modal L4 |
 | PP-StructureV3 (GPU) | server models, tables, chart branch | Modal L4 |
 | MinerU 2.5 (VLM) | VLM backend, page by page | Modal L4 |
-| GLM-OCR | 0.9B VLM | Modal L4 (vLLM) |
-| Chandra OCR 2 | datalab VLM | Modal L4 |
-| Unlimited-OCR | tiled VLM | Modal L4 |
-| Nemotron 3.5 Parse | NVIDIA VLM + the repo's own postprocessing | Modal L4 |
+| LiteParse + Tesseract | raster + bundled Tesseract | CPU |
+| PaddleOCR PP-StructureV3 | layout → OCR → tables → order, mobile models | CPU |
 
 Each was run the way its project intends: native CLI or API, default prompts from the model cards, and
 `records/<id>.json` holds the raw output verbatim.
@@ -104,7 +104,7 @@ image.
 `GET /api/health` reports which modes this server can run — `glm`, `fast`, `chandra`, `nemotron`,
 `unlimited`, `mineru`, `paddle`, each with its name, availability and cold-start note, which is what
 the page's picker is built from. `POST /api/parse` takes the file as the body and `X-Mode:
-glm|fast|chandra|nemotron|unlimited|mineru|paddle` (or `?mode=`); with neither, it uses GLM-OCR.
+glm|fast|chandra|nemotron|unlimited|mineru|paddle` (or `?mode=`); with neither, it uses Chandra OCR 2.
 
 A comma-separated list asks for a comparison: `X-Mode: chandra,nemotron` reads the same rendered
 pages with both, concurrently, and the response carries one system and one cell per engine. An
@@ -142,10 +142,11 @@ OCR_CORPUS=scans OCR_MODE=fast .venv-index/bin/cocoindex update main.py
 It declares `out/documents/<path>.json` (per-page text and counts, plus the digest it was read
 from), `out/pages.jsonl` (one row per page) and `out/summary.json` (what ran, what failed, what was
 skipped). Reads are memoised in `cocoindex.db` on content digest + mode + engine identity + page
-limit; delete it to force a full re-read. `OCR_MODE` defaults to `glm` when `GLM_OCR_BASE_URL` is set
-and `fast` otherwise; `OCR_MAX_PAGES` defaults to every page (the upload API caps at 5), and
-`OCR_CORPUS` / `OCR_OUT` / `OCR_DB` name the rest. The fast path needs `lit`; GLM needs the endpoint
-above. The indexer is optional and pinned in `requirements-cocoindex.txt`, which now also installs
+limit; delete it to force a full re-read. `OCR_MODE` defaults to `chandra` when `CHANDRA_OCR_BASE_URL`
+is set, then `glm` when `GLM_OCR_BASE_URL` is set, and `fast` otherwise; `OCR_MAX_PAGES` defaults to
+every page (the upload API caps at 5), and `OCR_CORPUS` / `OCR_OUT` / `OCR_DB` name the rest. The fast
+path needs `lit`; Chandra and GLM need their endpoints above. The indexer is optional and pinned in
+`requirements-cocoindex.txt`, which now also installs
 the service's one runtime dependency.
 
 Re-running a parser writes its record; then `make site` picks it up:
@@ -179,8 +180,9 @@ rsync -av --delete index.html assets user@host:/var/www/ocr-playground/
 works — the page has no build step, no frameworks, no external requests.
 
 The upload service is a second container. It keeps the CPU toolchain for the fast path, and needs
-`GLM_OCR_BASE_URL` in its environment for the default path; without it, GLM-OCR shows as unavailable
-and the page falls back to LiteParse + Tesseract. `deploy/README.md` has the run command.
+`CHANDRA_OCR_BASE_URL` in its environment for the default path; without it, Chandra OCR 2 shows as
+unavailable and the page falls back to the first configured parser (GLM-OCR if present, otherwise
+LiteParse + Tesseract). `deploy/README.md` has the run command.
 
 ## What the numbers are, and are not
 

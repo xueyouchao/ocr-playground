@@ -40,7 +40,7 @@ It supports two document sources through one renderer:
 | source | parsed | parsers | shape |
 | --- | --- | --- | --- |
 | the bundled sample | ahead of time | all eight | `evidence.json` |
-| your upload | live, per request | GLM-OCR (default) or LiteParse + Tesseract | API response |
+| your upload | live, per request | Chandra OCR 2 (default) or LiteParse + Tesseract | API response |
 
 The page has exactly one branch for this — `currentDoc()` returns `state.uploaded || DATA` — because
 the upload service returns the **same evidence shape** the static build produces. That is the central
@@ -122,14 +122,14 @@ temperature 0 for the VLMs, one page per call.
 
 | system | approach | runs on |
 | --- | --- | --- |
-| LiteParse + Tesseract | PDFium raster + bundled Tesseract, layout by grid projection | CPU ×4 |
-| PaddleOCR PP-StructureV3 | mobile layout/OCR/table models, reading order | CPU ×4 |
+| Chandra OCR 2 | datalab VLM, layout-rich HTML out | Modal L4 |
+| Nemotron 3.5 Parse | NVIDIA VLM + the model repo's own postprocessing | Modal L4 |
+| GLM-OCR | 0.9B VLM, 128K context | Modal L4 (vLLM) |
+| Unlimited-OCR | tiled 640 px inference for long pages | Modal L4 |
 | PP-StructureV3 (GPU) | PP-DocLayout-L + PP-OCRv5 server + table/formula/chart branches | Modal L4 |
 | MinerU 2.5 (VLM) | MinerU2.5-1.2B + layout/table models | Modal L4 |
-| GLM-OCR | 0.9B VLM, 128K context | Modal L4 (vLLM) |
-| Chandra OCR 2 | datalab VLM, layout-rich HTML out | Modal L4 |
-| Unlimited-OCR | tiled 640 px inference for long pages | Modal L4 |
-| Nemotron 3.5 Parse | NVIDIA VLM + the model repo's own postprocessing | Modal L4 |
+| LiteParse + Tesseract | PDFium raster + bundled Tesseract, layout by grid projection | CPU ×4 |
+| PaddleOCR PP-StructureV3 | mobile layout/OCR/table models, reading order | CPU ×4 |
 
 The GPU apps all scale to zero and cache models in Modal volumes; the VLM runner
 (`runners/vlm_endpoint.py`) speaks plain OpenAI-compatible chat completions, so a hosted API
@@ -150,9 +150,9 @@ different processes:
 
 | mode | parser | where | character |
 | --- | --- | --- | --- |
-| `glm` (default) | GLM-OCR, a 0.9B VLM | Modal L4, scale-to-zero | best on handwriting and tables; cold start of minutes after idle |
+| `chandra` (default) | Chandra OCR 2 | Modal L4, scale-to-zero | layout-rich markdown; the slowest, about a minute a page |
+| `glm` | GLM-OCR, a 0.9B VLM | Modal L4, scale-to-zero | best on handwriting and tables; cold start of minutes after idle |
 | `fast` | LiteParse + Tesseract | this server's CPU | ~2 s/page; visibly weaker on the same pages |
-| `chandra` | Chandra OCR 2 | Modal L4, scale-to-zero | the slowest, about a minute a page |
 | `nemotron` | Nemotron 3.5 Parse | Modal L4, scale-to-zero | about 5 s a warm page, markdown with tables |
 | `unlimited` | Unlimited-OCR | Modal L4, scale-to-zero | about 45 s a page; crops and stitches long pages |
 | `mineru` | MinerU 2.5 (VLM) | Modal L4, scale-to-zero | about 70 s a page, its VLM backend |
@@ -168,10 +168,10 @@ explanation, and offers the fast path beside it.
 Contract: `POST /api/parse` with the file as the request body, a `Content-Type`, an `X-Filename`
 header (percent-encoded — header values are Latin-1, so `扫描.png` cannot ride in one verbatim), and
 `X-Mode: glm|fast|chandra|nemotron|unlimited|mineru|paddle` (or `?mode=fast`). With no mode it is
-GLM-OCR. The response is the evidence shape above, with one system per selected engine.
+Chandra OCR 2. The response is the evidence shape above, with one system per selected engine.
 `GET /api/health` reports which modes this server can actually run and the limits; the page reads it
-to disable GLM-OCR when the deployment has no endpoint, and to select the fast path rather than fail
-the first upload.
+to disable a parser the deployment has no endpoint for, and to select the first configured path
+rather than fail the first upload.
 
 **The same reading, indexed.** Reading is a use case (`application/read_document.py`); the HTTP
 handler is a shell around it and the indexer is a second caller.
@@ -269,11 +269,12 @@ descriptive statistics — not a leaderboard.
   styles); everything else goes through a converter that escapes before it formats. `srcdoc` is a
   double-quoted attribute, so quotes are escaped too. Extracted figures point at files that were never
   shipped, so `<img>` becomes an "image not shipped" chip instead of a broken-image icon.
-- **GLM-OCR by default, with its cost on the label.** GLM-OCR reads this corpus's handwriting far
-  better than Tesseract, so it is the default path — but it is a scale-to-zero GPU, and the first read
-  after idle waits minutes. Rather than hide that behind a spinner or silently fall back, the panel
-  names both paths, states the trade, and lets the picker choose fast. A silent fallback would hand
-  back a reading while claiming a model that never ran.
+- **Chandra OCR 2 by default, with its cost on the label.** Chandra returns layout-rich markdown
+  with tables, so it is the default path — but it is a scale-to-zero GPU and the slowest parser here,
+  about a minute a page, and the first read after idle waits for boot. Rather than hide that behind a
+  spinner or silently fall back, the panel states the trade, keeps GLM-OCR for the best handwriting
+  reading and LiteParse + Tesseract for speed, and lets the picker choose either. A silent fallback
+  would hand back a reading while claiming a model that never ran.
 - **CocoIndex for the batch path, not the request path.** Indexing a directory wants memoisation,
   retraction of documents that disappeared, and a run that can be restarted; an upload wants an answer
   inside one request. Both call the same use case, so the index cannot quietly read a document with a

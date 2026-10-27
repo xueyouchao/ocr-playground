@@ -1,21 +1,21 @@
 [
   {
-    "id": "liteparse-tesseract",
-    "name": "LiteParse + Tesseract",
-    "kind": "staged",
-    "pipeline": "PDFium/raster + bundled Tesseract, layout by grid projection",
-    "runner": "runners/liteparse_system.py",
-    "needs": "liteparse",
-    "device": "native \u00b7 CPU \u00d74 (Tesseract)"
+    "id": "chandra-2",
+    "name": "Chandra OCR 2",
+    "kind": "vlm",
+    "pipeline": "datalab-to/chandra-ocr-2 \u2014 page in, markdown with layout and tables out (vLLM)",
+    "runner": "runners/vlm_endpoint.py --model chandra-ocr-2",
+    "needs": "GPU (vLLM) or datalab API key",
+    "device": "remote \u00b7 GPU L4 (Modal)"
   },
   {
-    "id": "paddleocr-structure",
-    "name": "PaddleOCR PP-StructureV3",
-    "kind": "staged",
-    "pipeline": "layout detection \u2192 region OCR \u2192 table structure \u2192 reading order",
-    "runner": "runners/paddle_structure.py",
-    "needs": "paddleocr + paddlex[ocr]",
-    "device": "native \u00b7 CPU \u00d74 (mobile models)"
+    "id": "nemotron-parse",
+    "name": "Nemotron 3.5 Parse",
+    "kind": "vlm",
+    "pipeline": "NVIDIA VLM document parser \u2014 page in, markdown/structured out (NIM or vLLM)",
+    "runner": "runners/vlm_endpoint.py --model nemotron-3.5-parse",
+    "needs": "NVIDIA NIM API key or GPU",
+    "device": "remote \u00b7 GPU L4 (Modal)"
   },
   {
     "id": "glm-ocr",
@@ -27,30 +27,12 @@
     "device": "remote \u00b7 GPU L4 (Modal)"
   },
   {
-    "id": "chandra-2",
-    "name": "Chandra OCR 2",
-    "kind": "vlm",
-    "pipeline": "datalab-to/chandra-ocr-2 \u2014 page in, markdown with layout and tables out (vLLM)",
-    "runner": "runners/vlm_endpoint.py --model chandra-ocr-2",
-    "needs": "GPU (vLLM) or datalab API key",
-    "device": "remote \u00b7 GPU L4 (Modal)"
-  },
-  {
     "id": "unlimited-ocr",
     "name": "Unlimited-OCR",
     "kind": "vlm",
     "pipeline": "tiled 640px \"gundam\" inference for long pages \u2014 page in, markdown out (vLLM)",
     "runner": "runners/vlm_endpoint.py --model unlimited-ocr",
     "needs": "GPU (vLLM) or Baidu Qianfan key",
-    "device": "remote \u00b7 GPU L4 (Modal)"
-  },
-  {
-    "id": "nemotron-parse",
-    "name": "Nemotron 3.5 Parse",
-    "kind": "vlm",
-    "pipeline": "NVIDIA VLM document parser \u2014 page in, markdown/structured out (NIM or vLLM)",
-    "runner": "runners/vlm_endpoint.py --model nemotron-3.5-parse",
-    "needs": "NVIDIA NIM API key or GPU",
     "device": "remote \u00b7 GPU L4 (Modal)"
   },
   {
@@ -70,5 +52,23 @@
     "device": "remote \u00b7 GPU L4 (Modal)",
     "runner": "modal/mineru_gpu.py",
     "needs": "Modal app ocr-playground-mineru; MinerU 2.7.6, VLM backend"
+  },
+  {
+    "id": "liteparse-tesseract",
+    "name": "LiteParse + Tesseract",
+    "kind": "staged",
+    "pipeline": "PDFium/raster + bundled Tesseract, layout by grid projection",
+    "runner": "runners/liteparse_system.py",
+    "needs": "liteparse",
+    "device": "native \u00b7 CPU \u00d74 (Tesseract)"
+  },
+  {
+    "id": "paddleocr-structure",
+    "name": "PaddleOCR PP-StructureV3",
+    "kind": "staged",
+    "pipeline": "layout detection \u2192 region OCR \u2192 table structure \u2192 reading order",
+    "runner": "runners/paddle_structure.py",
+    "needs": "paddleocr + paddlex[ocr]",
+    "device": "native \u00b7 CPU \u00d74 (mobile models)"
   }
 ]

@@ -45,6 +45,10 @@
   .theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .theme-toggle[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
   .lede { color: var(--soft); max-width: 90ch; margin: 0 0 6px; }
+  /* The intro is long on a wide screen. Two columns cut its height without cutting the text. */
+  @media (min-width: 1100px) {
+    .lede.intro { max-width: none; columns: 2; column-gap: 40px; column-rule: 1px solid var(--line); }
+  }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--soft);
        margin: 34px 0 12px; font-weight: 650; }
   button { font: inherit; color: inherit; }
@@ -178,11 +182,11 @@
     <span aria-hidden="true">☾</span> night theme
   </button>
 </div>
-<p class="lede">
+<p class="lede intro">
   Every pane is a parser run the way its own project intends. The baseline is an <b>open-source,
   text-based CPU pipeline</b> (LiteParse + Tesseract): no GPU, a couple of seconds per page, and a
   predictable cost, so it is the reference the other panes are read against. The comparison is
-  <b>open-source VLM-based OCR</b> (GLM-OCR, Chandra OCR 2, Nemotron Parse, Unlimited-OCR, MinerU 2.5),
+  <b>open-source VLM-based OCR</b> (Chandra OCR 2, Nemotron Parse, GLM-OCR, Unlimited-OCR, MinerU 2.5),
   which reads handwriting and
   tables noticeably better but needs a GPU. <b>General-purpose vision-language models</b> such as
   Anthropic's Claude Opus were not chosen: their per-page cost and latency are far higher than either
@@ -192,14 +196,15 @@
 <section class="uploader" id="uploader">
   <div>
     <b>Read your own document</b>
-    <span>A PDF (up to 5 pages) or one image. <b>GLM-OCR</b> reads handwriting and tables best, but its GPU
-      scales to zero: the first upload after idle waits ~3 minutes for boot, then ~5 seconds a page while
-      warm (2 minutes). <b>LiteParse + Tesseract</b> is CPU-fast, but weaker on handwriting.
-      <b>PP-StructureV3 (GPU)</b>, PaddleOCR's own pipeline, is there too — structured tables and charts.</span>
+    <span>A PDF (up to 5 pages) or one image. <b>Chandra OCR 2</b> is the default: layout-rich markdown
+      with tables, at about a minute a page, and its GPU scales to zero, so the first upload after idle
+      also waits for boot. <b>GLM-OCR</b> is the faster warm path (about 5 seconds a page) and reads
+      handwriting best. <b>LiteParse + Tesseract</b> is CPU-fast, but weaker on handwriting.</span>
     <div class="modes" id="modes">
       <span class="modes-label" id="modes-label">read it with</span>
       <div class="checks" id="mode-checks" role="group" aria-labelledby="modes-label">
-        <label><input type="checkbox" value="glm" checked><span>GLM-OCR</span></label>
+        <label><input type="checkbox" value="glm"><span>GLM-OCR</span></label>
+        <label><input type="checkbox" value="chandra" checked><span>Chandra OCR 2</span></label>
         <label><input type="checkbox" value="fast"><span>LiteParse + Tesseract</span></label>
       </div>
       <small id="mode-detail" aria-live="polite"></small>
@@ -249,7 +254,7 @@
 
 <script>
 const DATA = __EVIDENCE__;
-const state = { page: 1, view: {}, allPreview: true, uploaded: null, modes: ["glm"], find: {} };
+const state = { page: 1, view: {}, allPreview: true, uploaded: null, modes: ["chandra"], find: {} };
 // The renderers do not care whether the document is the bundled sample or a fresh upload: both
 // arrive in the same shape, so this is the only branch in the page.
 const currentDoc = () => state.uploaded || DATA;
@@ -1027,9 +1032,9 @@ $("preview-all").addEventListener("click", () => {
 
 // ---------- read your own document ----------
 // The upload runs on the same origin, behind the same Traefik router (`/api`). The GPU parsers —
-// GLM-OCR by default, plus the others this host has an endpoint for — run on scale-to-zero GPUs,
-// read handwriting and tables best, and pay a cold start of about three minutes before the first
-// page comes back. LiteParse + Tesseract, on this server's CPU, answers in seconds. The panel says
+// Chandra OCR 2 by default, plus the others this host has an endpoint for — run on scale-to-zero
+// GPUs, read layout and tables into markdown, and pay a cold start of about three minutes before
+// the first page comes back. LiteParse + Tesseract, on this server's CPU, answers in seconds. The panel says
 // both of those things, because a demo that looks hung for three minutes without explaining itself
 // is worse than a slower honest one.
 
@@ -1045,9 +1050,9 @@ function uploadStatus(message, isError) {
 // The picker is a checkbox group because the server can read the same document with several
 // parsers at once and return them side by side. The list comes from /api/health, so a parser this
 // host has no endpoint for appears labelled and unselectable rather than failing an upload.
-const MODE_AVAILABLE = { glm: true, fast: true };
-const MODE_COLD = { glm: true, fast: false };
-const MODE_NAME = { glm: "GLM-OCR", fast: "LiteParse + Tesseract" };
+const MODE_AVAILABLE = { glm: true, chandra: true, fast: true };
+const MODE_COLD = { chandra: true, glm: true, fast: false };
+const MODE_NAME = { chandra: "Chandra OCR 2", glm: "GLM-OCR", fast: "LiteParse + Tesseract" };
 const MODE_DETAIL = {};
 
 function modeBoxes() {
@@ -1061,7 +1066,7 @@ let uploadBusy = false;
 let userChoseMode = false;
 
 function primaryMode() {
-  return state.modes[0] || "glm";
+  return state.modes[0] || "chandra";
 }
 
 function applyModes() {
@@ -1211,7 +1216,7 @@ async function readUpload(file) {
       + (silent ? ` · ${silent} could not read it` : ""));
     render();
   } catch (error) {
-    const hint = modes.includes("glm")
+    const hint = !modes.includes("fast")
       ? " — or tick LiteParse + Tesseract, the fast option."
       : "";
     uploadStatus(`could not read that file — ${error.message}${hint}`, true);
