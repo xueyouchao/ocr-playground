@@ -16,6 +16,11 @@ what PP-StructureV3 is meant to run.
     modal deploy modal/serve_paddle.py
     PADDLE_OCR_BASE_URL=https://…/v1 make api
 """
+import base64
+import tempfile
+from contextlib import nullcontext
+from pathlib import Path
+
 import modal
 
 # The batch probe already downloaded PaddleOCR's model set here, so this app boots warm on it.
@@ -25,12 +30,47 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     # PaddleOCR links against OpenCV and friends at import time; a slim image has none of them.
     .apt_install("libgl1", "libglib2.0-0", "libsm6", "libxext6", "libxrender1")
-    .pip_install("paddlepaddle-gpu", index_url="https://www.paddlepaddle.org.cn/packages/stable/cu126/")
-    .pip_install("paddleocr", "paddlex[ocr]", "fastapi[standard]")
+    # Pinned to the versions the recorded upload ran on: PPStructureV3's options and the markdown
+    # result shape are not stable across minor releases, so a rebuild must not pick new ones.
+    .pip_install("paddlepaddle-gpu==3.3.1", index_url="https://www.paddlepaddle.org.cn/packages/stable/cu126/")
+    .pip_install(
+        "paddleocr==3.7.0",
+        "paddlex[ocr]==3.7.2",
+        "fastapi[standard]==0.162.0",
+        "pydantic==2.14.1",
+    )
 )
 
 app = modal.App("ocr-playground-paddle")
 MODEL = "paddleocr"
+
+
+def page_bytes(messages: list[dict]) -> bytes:
+    """The base64 page carried by an OpenAI-style message list."""
+    image_url = next(
+        part["image_url"]["url"]
+        for message in messages
+        for part in (message.get("content") or [])
+        if isinstance(part, dict) and part.get("type") == "image_url"
+    )
+    return base64.b64decode(image_url.split(",", 1)[1])
+
+
+def markdown_text(result) -> str:
+    """PP-StructureV3 puts markdown in a dict; older results are already a string."""
+    markdown = result.markdown
+    return markdown.get("markdown_texts", "") if isinstance(markdown, dict) else str(markdown or "")
+
+
+def read_page(pipeline, payload: bytes, lock=None) -> str:
+    """Run one page and return its markdown; the scratch file is gone before the caller sees it."""
+    suffix = ".jpg" if payload.startswith(b"\xff\xd8") else ".png"
+    with tempfile.TemporaryDirectory() as scratch:
+        page = Path(scratch) / f"page{suffix}"
+        page.write_bytes(payload)
+        with (lock or nullcontext()):
+            result = pipeline.predict(str(page))[0]
+    return markdown_text(result)
 
 
 def load_pipeline():
@@ -95,33 +135,9 @@ def web():
 
     @api.post("/v1/chat/completions")
     def chat(body: Chat):
-        import base64
-        import tempfile
-        from pathlib import Path
-
-        image_url = next(
-            part["image_url"]["url"]
-            for message in body.messages
-            for part in message["content"]
-            if part["type"] == "image_url"
-        )
-        payload = base64.b64decode(image_url.split(",", 1)[1])
-
-        with tempfile.TemporaryDirectory() as scratch:
-            suffix = ".jpg" if payload.startswith(b"\xff\xd8") else ".png"
-            page = Path(scratch) / f"page{suffix}"
-            page.write_bytes(payload)
-            # One prediction per page: the pipeline is stateful about reading order and markdown
-            # assembly, and a single-page call is exactly what the batch row recorded.
-            with predict_lock:
-                result = pipeline.predict(str(page))[0]
-
-        markdown = result.markdown
-        text = (
-            markdown.get("markdown_texts", "")
-            if isinstance(markdown, dict)
-            else str(markdown or "")
-        )
+        # One prediction per page: the pipeline is stateful about reading order and markdown
+        # assembly, and a single-page call is exactly what the batch row recorded.
+        text = read_page(pipeline, page_bytes(body.messages), predict_lock)
         return {"choices": [{"message": {"role": "assistant", "content": text}}]}
 
     return api
