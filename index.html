@@ -974,6 +974,8 @@ function renderFooter() {
     $("footer").textContent = `${doc.systems.length} parsers on ${doc.pages.length} pages · recorded from each project's own CLI/API on a 4-core CPU box `
       + `(200 dpi page renders) and Modal L4 GPUs · runs are in records/, provenance in systems.json.`;
   }
+  // The harness is MIT except the vendored Nemotron helper; one clause keeps the page honest about it.
+  $("footer").textContent += " Code: MIT licence.";
   $("preview-all").setAttribute("aria-pressed", String(state.allPreview));
 }
 
