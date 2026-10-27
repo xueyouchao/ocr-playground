@@ -3,3 +3,5 @@
 -r requirements.txt
 pytest==9.1.1
 ruff==0.17.2
+# The wrapper's dark-page tests build and decode tiny real images; the wrapper image pins this too.
+pillow==12.1.0
