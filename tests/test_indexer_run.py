@@ -28,7 +28,7 @@ pytestmark = pytest.mark.skipif(
 
 def run_update(env: dict[str, str]) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [str(COCOINDEX), "update", "main.py"],
+        [str(COCOINDEX), "update", "scripts/index.py"],
         cwd=ROOT, env=env, capture_output=True, text=True, timeout=300,
     )
 
@@ -38,7 +38,7 @@ def test_a_corpus_is_read_incrementally(tmp_path) -> None:
     corpus.mkdir()
     subprocess.run(
         ["pdftoppm", "-png", "-r", "120", "-f", "1", "-l", "1", "-singlefile",
-         str(ROOT / "corpus" / "document.pdf"), str(corpus / "form")],
+         str(ROOT / "data" / "corpus" / "document.pdf"), str(corpus / "form")],
         check=True,
     )
     (corpus / "notes.txt").write_text("not a document\n")
