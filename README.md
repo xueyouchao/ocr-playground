@@ -32,7 +32,8 @@ stored.
 
 The bundled document is
 [`corpus/document.pdf`](corpus/document.pdf) — six pages from a demo corpus: one printed page and five
-handwritten flight/field forms, read ahead of time by all eight systems.
+handwritten flight/field forms, read ahead of time by all eight systems. Where the scan came from, and
+what that means for redistributing it, is in [`THIRD_PARTY.md`](THIRD_PARTY.md#the-bundled-sample-document).
 
 ## Why it exists
 
@@ -262,5 +263,17 @@ the runs showed, and the trade-offs behind the decisions. This README stays the 
 
 Parsers belong to their projects: [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR),
 [MinerU](https://github.com/opendatalab/MinerU), [Chandra](https://github.com/datalab-to/chandra),
-[Unlimited-OCR](https://github.com/baidu/Unlimited-OCR), NVIDIA Nemotron-3.5-Parse,
-[LiteParse](https://github.com/datalab-to/liteparse). Their licences apply to their output.
+[GLM-OCR](https://huggingface.co/zai-org/GLM-OCR), [Unlimited-OCR](https://github.com/baidu/Unlimited-OCR),
+NVIDIA Nemotron-3.5-Parse, [LiteParse](https://github.com/datalab-to/liteparse). Their licences apply
+to their output. [`THIRD_PARTY.md`](THIRD_PARTY.md) says what is vendored, what is only invoked, and
+which terms apply to which part.
+
+## Licence
+
+MIT — see [`LICENSE`](LICENSE), copyright 2026 xueyouchao.
+
+One carve-out: `modal/nemotron_helper/` is vendored NVIDIA code under OpenMDW-1.1, with the SPDX
+headers and the upstream revision left intact. The agreement is in
+[`LICENSES/OpenMDW-1.1.txt`](LICENSES/OpenMDW-1.1.txt); everything outside that directory is MIT.
+The bundled sample scan raises a separate provenance question, which [`THIRD_PARTY.md`](THIRD_PARTY.md)
+records.
