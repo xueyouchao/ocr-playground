@@ -3,8 +3,8 @@
 The CPU row earlier used `-b pipeline -m ocr`, which is the mobile-ish path; this runs MinerU's own
 vision-language backend on an L4 and returns its per-page markdown from the content list.
 
-    modal run modal/mineru_gpu.py            # writes data/records/mineru-gpu.json
-    modal run modal/mineru_gpu.py --backend pipeline
+    modal run deploy/modal/mineru_gpu.py            # writes data/records/mineru-gpu.json
+    modal run deploy/modal/mineru_gpu.py --backend pipeline
 """
 import modal
 
@@ -115,7 +115,7 @@ def main(backend: str = "vlm-auto-engine", pdf: str = ""):
     import sys
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     if str(root / "src") not in sys.path:
         sys.path.insert(0, str(root / "src"))
     from ocr_playground.interfaces.site.layout import data

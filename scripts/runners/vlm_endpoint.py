@@ -3,7 +3,7 @@
 Works for a vLLM server (GLM-OCR, Chandra OCR 2, Unlimited-OCR, Nemotron-parse all serve that way)
 or a provider's hosted API, as long as it accepts image_url content.
 
-    python runners/vlm_endpoint.py --id glm-ocr --model glm-ocr \
+    python scripts/runners/vlm_endpoint.py --id glm-ocr --model glm-ocr \
         --base-url https://.../v1 --api-key "$KEY"
 """
 import argparse

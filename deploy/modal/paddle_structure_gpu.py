@@ -4,7 +4,7 @@ The CPU row in this shootout had to fall back to the mobile models to get under 
 one is what the pipeline actually is when it has the hardware it was designed for. Run in-container:
 the first call downloads the model set and inference on a dense page can outlive an HTTP request.
 
-    modal run modal/paddle_structure_gpu.py --paths /tmp/ocr-playground/pages/page-1.png,…
+    modal run deploy/modal/paddle_structure_gpu.py --paths /tmp/ocr-playground/pages/page-1.png,…
 """
 import modal
 
@@ -56,7 +56,7 @@ def main(paths: str = ""):
     import sys
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     if str(root / "src") not in sys.path:
         sys.path.insert(0, str(root / "src"))
     from ocr_playground.interfaces.site.layout import data

@@ -4,7 +4,7 @@
     "name": "Chandra OCR 2",
     "kind": "vlm",
     "pipeline": "datalab-to/chandra-ocr-2 \u2014 page in, markdown with layout and tables out (vLLM)",
-    "runner": "runners/vlm_endpoint.py --model chandra-ocr-2",
+    "runner": "scripts/runners/vlm_endpoint.py --model chandra-ocr-2",
     "needs": "GPU (vLLM) or datalab API key",
     "device": "remote \u00b7 GPU L4 (Modal)"
   },
@@ -13,7 +13,7 @@
     "name": "Nemotron 3.5 Parse",
     "kind": "vlm",
     "pipeline": "NVIDIA VLM document parser \u2014 page in, markdown/structured out (NIM or vLLM)",
-    "runner": "runners/vlm_endpoint.py --model nemotron-3.5-parse",
+    "runner": "scripts/runners/vlm_endpoint.py --model nemotron-3.5-parse",
     "needs": "NVIDIA NIM API key or GPU",
     "device": "remote \u00b7 GPU L4 (Modal)"
   },
@@ -22,7 +22,7 @@
     "name": "GLM-OCR",
     "kind": "vlm",
     "pipeline": "0.9B VLM, 128K ctx \u2014 one page in, markdown out (vLLM or Zhipu API)",
-    "runner": "runners/vlm_endpoint.py --model glm-ocr",
+    "runner": "scripts/runners/vlm_endpoint.py --model glm-ocr",
     "needs": "GPU (vLLM) or Zhipu API key",
     "device": "remote \u00b7 GPU L4 (Modal)"
   },
@@ -31,7 +31,7 @@
     "name": "Unlimited-OCR",
     "kind": "vlm",
     "pipeline": "tiled 640px \"gundam\" inference for long pages \u2014 page in, markdown out (vLLM)",
-    "runner": "runners/vlm_endpoint.py --model unlimited-ocr",
+    "runner": "scripts/runners/vlm_endpoint.py --model unlimited-ocr",
     "needs": "GPU (vLLM) or Baidu Qianfan key",
     "device": "remote \u00b7 GPU L4 (Modal)"
   },
@@ -41,7 +41,7 @@
     "kind": "staged",
     "pipeline": "PaddleOCR 3.7 server models: PP-DocLayout-L + PP-OCRv5_server + table/formula recognition",
     "device": "remote \u00b7 GPU L4 (Modal)",
-    "runner": "modal/paddle_structure_gpu.py",
+    "runner": "deploy/modal/paddle_structure_gpu.py",
     "needs": "paddleocr-gpu on a GPU \u2014 the CPU row above is the mobile-model build"
   },
   {
@@ -50,7 +50,7 @@
     "kind": "hybrid",
     "pipeline": "VLM backend: MinerU2.5-1.2B + layout/table models, all on GPU",
     "device": "remote \u00b7 GPU L4 (Modal)",
-    "runner": "modal/mineru_gpu.py",
+    "runner": "deploy/modal/mineru_gpu.py",
     "needs": "Modal app ocr-playground-mineru; MinerU 2.7.6, VLM backend"
   },
   {
@@ -58,7 +58,7 @@
     "name": "LiteParse + Tesseract",
     "kind": "staged",
     "pipeline": "PDFium/raster + bundled Tesseract, layout by grid projection",
-    "runner": "runners/liteparse_system.py",
+    "runner": "scripts/runners/liteparse_system.py",
     "needs": "liteparse",
     "device": "native \u00b7 CPU \u00d74 (Tesseract)"
   },
@@ -67,7 +67,7 @@
     "name": "PaddleOCR PP-StructureV3",
     "kind": "staged",
     "pipeline": "layout detection \u2192 region OCR \u2192 table structure \u2192 reading order",
-    "runner": "runners/paddle_structure.py",
+    "runner": "scripts/runners/paddle_structure.py",
     "needs": "paddleocr + paddlex[ocr]",
     "device": "native \u00b7 CPU \u00d74 (mobile models)"
   }

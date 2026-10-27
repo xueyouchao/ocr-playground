@@ -30,8 +30,8 @@ Because the directory is bind-mounted, `make publish` is the whole deploy — no
 The upload API is its own container, sharing the hostname under `/api` (Traefik picks the longer rule):
 
 ```bash
-# the context is the repository root: the image carries src/ beside api/server.py
-docker build -t ocr-playground-api:latest -f api/Dockerfile .
+# the context is the repository root: the image carries src/ beside scripts/api.py
+docker build -t ocr-playground-api:latest -f deploy/api.Dockerfile .
 docker run -d --name ocr-playground-api --restart unless-stopped \
   -e GLM_OCR_BASE_URL=https://<workspace>--ocr-playground-glm-ocr-serve.modal.run/v1 \
   -e CHANDRA_OCR_BASE_URL=https://<workspace>--ocr-playground-chandra-web.modal.run/v1 \
@@ -48,16 +48,16 @@ docker run -d --name ocr-playground-api --restart unless-stopped \
   ocr-playground-api:latest
 ```
 
-Each `*_BASE_URL` points at the app from the matching `modal deploy modal/serve_*.py`; Modal prints
+Each `*_BASE_URL` points at the app from the matching `modal deploy deploy/modal/serve_*.py`; Modal prints
 the URL, and the served name follows the wrapper. `PADDLE_OCR_BASE_URL` comes from
-`modal deploy modal/serve_paddle.py` (app `ocr-playground-paddle`, an A10G because the L4 pool was
+`modal deploy deploy/modal/serve_paddle.py` (app `ocr-playground-paddle`, an A10G because the L4 pool was
 dry). Leave any variable out and that mode is listed but greyed out rather than failing an upload;
 with `GLM_OCR_BASE_URL` missing, the page selects the fast path (LiteParse + Tesseract) instead. The
 GPUs scale to zero, so the first upload after idle waits minutes for the model to boot; the container
 holds the request for up to `GLM_OCR_BUDGET_SECONDS` (900 s) rather than giving up.
 
 It is unauthenticated and public, and so is the Modal endpoint behind it. The only defences are the
-caps in `api/server.py` (20 MB, 5 pages, 120 s per fast parse, 900 s for a whole GLM document, two
+caps in `scripts/api.py` (20 MB, 5 pages, 120 s per fast parse, 900 s for a whole GLM document, two
 parses at a time) and the fact that nothing it receives is written to disk outside a temporary
 directory. Add rate limiting before pointing it at anything that matters.
 

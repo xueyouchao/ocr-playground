@@ -1,17 +1,17 @@
 # Third-party terms
 
 This repository is MIT (see [`LICENSE`](LICENSE)), **with one exception**: the vendored
-`modal/nemotron_helper/` tree is NVIDIA code under OpenMDW-1.1. Nothing here is relicensed by being
+`deploy/modal/nemotron_helper/` tree is NVIDIA code under OpenMDW-1.1. Nothing here is relicensed by being
 in this repository, and each parser keeps its own terms.
 
-## Vendored code — `modal/nemotron_helper/`
+## Vendored code — `deploy/modal/nemotron_helper/`
 
 | | |
 | --- | --- |
 | Upstream | <https://github.com/nvidia/Nemotron-3.5-Parse> |
 | Revision | `0fad7099302dc11313b7e3157eb8fd6ae633176e` |
 | Licence | OpenMDW-1.1 — full text in [`LICENSES/OpenMDW-1.1.txt`](LICENSES/OpenMDW-1.1.txt) |
-| File list | `modal/nemotron_helper/nemotron_parse/SOURCE_MANIFEST.json` — upstream path and sha256 for the 18 files extracted under `nemotron_parse/engine/`. The seven other tagged files are **not** in that list: `nemotron_parse/{__init__,inference,batch,tables,postprocessing}.py` and the two compatibility shims at the helper root |
+| File list | `deploy/modal/nemotron_helper/nemotron_parse/SOURCE_MANIFEST.json` — upstream path and sha256 for the 18 files extracted under `nemotron_parse/engine/`. The seven other tagged files are **not** in that list: `nemotron_parse/{__init__,inference,batch,tables,postprocessing}.py` and the two compatibility shims at the helper root |
 
 The `SPDX-FileCopyrightText` / `SPDX-License-Identifier` headers in those files are upstream's and
 are left untouched. Where a file is not in the manifest, its header is the provenance. OpenMDW-1.1

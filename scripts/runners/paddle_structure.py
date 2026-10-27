@@ -1,6 +1,6 @@
 """PaddleOCR PP-StructureV3, table recognition on. Run with the venv that has paddleocr:
 
-    /home/ubuntu/tmp/paddle-venv/bin/python runners/paddleocr.py
+    /home/ubuntu/tmp/paddle-venv/bin/python scripts/runners/paddleocr.py
 """
 from paddleocr import PPStructureV3
 

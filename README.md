@@ -99,7 +99,7 @@ make api
 make api                                      # no endpoint: fast (LiteParse + Tesseract) only
 ```
 
-The six GPU apps are `modal deploy modal/serve_{glm_ocr,chandra,nemotron,unlimited,mineru,paddle}.py`,
+The six GPU apps are `modal deploy deploy/modal/serve_{glm_ocr,chandra,nemotron,unlimited,mineru,paddle}.py`,
 one GPU each, all scaled to zero when idle. Five run on an L4; PP-StructureV3 runs on an A10G, also
 24 GB, because the L4 pool was out of capacity when its wrapper was deployed. The VLM wrappers share
 one HF cache volume, so the first boot of each pays for its own weights once; MinerU keeps its models
@@ -161,19 +161,19 @@ Re-running a parser writes its record; then `make site` picks it up:
 
 ```bash
 # CPU parsers
-LIT_CLI=/path/to/lit python runners/liteparse_system.py
-/home/ubuntu/tmp/paddle-venv/bin/python runners/paddle_structure.py
+LIT_CLI=/path/to/lit python scripts/runners/liteparse_system.py
+/home/ubuntu/tmp/paddle-venv/bin/python scripts/runners/paddle_structure.py
 
 # GPU parsers (Modal; each app scales to zero)
-modal deploy modal/serve_glm_ocr.py        # then point the runner at its URL
-python runners/vlm_endpoint.py --id glm-ocr --model glm-ocr \
+modal deploy deploy/modal/serve_glm_ocr.py        # then point the runner at its URL
+python scripts/runners/vlm_endpoint.py --id glm-ocr --model glm-ocr \
     --base-url https://…/v1 --prompt "Text Recognition:"
 
-modal run modal/paddle_structure_gpu.py --paths /tmp/ocr-playground/pages/page-1.png,…
-modal run modal/mineru_gpu.py              # page by page, retries, pipeline fallback
+modal run deploy/modal/paddle_structure_gpu.py --paths /tmp/ocr-playground/pages/page-1.png,…
+modal run deploy/modal/mineru_gpu.py              # page by page, retries, pipeline fallback
 ```
 
-`runners/vlm_endpoint.py` speaks any OpenAI-compatible endpoint, so a hosted API works as well as a
+`scripts/runners/vlm_endpoint.py` speaks any OpenAI-compatible endpoint, so a hosted API works as well as a
 Modal deployment. Cold Modal endpoints answer with a `303`; the runner follows it and waits.
 
 ## Deploy it
@@ -249,20 +249,23 @@ site/
   pages/*.jpg            the 110 dpi renders the rail shows (rebuilt by `make pages`)
   evidence.json          generated: records joined against the roster
   index.html             generated: template + inlined evidence, what gets published
-scripts/
+scripts/                 the entry points; each puts src/ on sys.path and nothing else
   prepare.py             render the scan -> /tmp/…/pages (parsers) + site/pages (rail)
   collect.py             records + roster -> site/evidence.json
   build.py               evidence + template -> site/index.html
   index.py               CocoIndex entry point -> interfaces/indexer
-src/ocr_playground/      the importable tree; entry points put src/ on the path, nothing above it
+  api.py                 the upload service -> interfaces/http
+  runners/               one file per CPU parser; _common.py defines the record shape
+src/ocr_playground/      the importable tree; nothing above src/ is a module
   domain/                documents, readings, engines, ports, domain errors
   application/           the read-document use case and the two-slot gate
   infrastructure/        poppler, ImageMagick, LiteParse, GLM-OCR, settings, fingerprint
   interfaces/            http/, indexer/, site/ (+ layout.py, which names data/ and site/)
   composition/           the dependency-injector container
-runners/                 one file per CPU parser; _common.py defines the record shape
-modal/                   one app per GPU parser, all scale-to-zero
-api/server.py            compatibility entry point -> interfaces/http
+deploy/
+  nginx.conf             static host for site/ (images cached, the page never)
+  api.Dockerfile         the service image: poppler, tesseract, ImageMagick, liteparse
+  modal/                 one app per GPU parser, all scale-to-zero; nemotron_helper/ is vendored
 docs/architecture.md     the design note behind the structure
 tests/                   the offline suite; tests/fakes.py holds the doubles
 requirements.txt         dependency-injector, pinned (the upload service only)
@@ -289,7 +292,7 @@ which terms apply to which part.
 
 MIT — see [`LICENSE`](LICENSE), copyright 2026 xueyouchao.
 
-One carve-out: `modal/nemotron_helper/` is vendored NVIDIA code under OpenMDW-1.1, with the SPDX
+One carve-out: `deploy/modal/nemotron_helper/` is vendored NVIDIA code under OpenMDW-1.1, with the SPDX
 headers and the upstream revision left intact. The agreement is in
 [`LICENSES/OpenMDW-1.1.txt`](LICENSES/OpenMDW-1.1.txt); everything outside that directory is MIT.
 The bundled sample scan raises a separate provenance question, which [`THIRD_PARTY.md`](THIRD_PARTY.md)

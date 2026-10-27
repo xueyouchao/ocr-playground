@@ -5,7 +5,7 @@ was trained on named tasks, so passing "convert to markdown" would measure a dif
 one Datalab ships. `prompt_type="ocr_layout"` is the layout-preserving markdown mode.
 
     modal deploy serve_chandra.py
-    runners/vlm_endpoint.py --id chandra-2 --model chandra --base-url https://…/v1
+    scripts/runners/vlm_endpoint.py --id chandra-2 --model chandra --base-url https://…/v1
 """
 import modal
 
