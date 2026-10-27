@@ -30,6 +30,15 @@ def test_an_endpoint_selects_glm_but_an_explicit_mode_wins(tmp_path) -> None:
     assert IndexerConfig.from_env(env | {"OCR_MODE": " FAST "}).mode == "fast"
 
 
+def test_chandra_is_the_default_when_both_endpoints_are_named(tmp_path) -> None:
+    env = {
+        "OCR_CORPUS": str(tmp_path),
+        "CHANDRA_OCR_BASE_URL": "https://chandra.example/v1",
+        "GLM_OCR_BASE_URL": "https://glm.example/v1",
+    }
+    assert IndexerConfig.from_env(env).mode == "chandra"
+
+
 def test_an_unknown_mode_names_the_choices(tmp_path) -> None:
     config = IndexerConfig.from_env({"OCR_CORPUS": str(tmp_path), "OCR_MODE": "nope"})
     with pytest.raises(ConfigError, match="OCR_MODE='nope' is not an extraction mode; use glm or fast"):

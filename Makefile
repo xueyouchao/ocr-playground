@@ -20,7 +20,7 @@ help:
 	@echo "make site     records/ -> evidence.json -> index.html (stdlib-only)"
 	@echo "make serve    serve the site on :$(PORT)"
 	@echo "make publish  copy index.html + assets/ to $(SITE_DIR) (see deploy/)"
-	@echo "make api      run the upload service on :8090 (needs the venv; GLM_OCR_BASE_URL=… for GLM-OCR)"
+	@echo "make api      run the upload service on :8090 (needs the venv; CHANDRA_OCR_BASE_URL=… for the default)"
 	@echo "make index    read OCR_CORPUS into out/ incrementally (needs requirements-cocoindex.txt)"
 	@echo "make clean    drop evidence.json and index.html"
 

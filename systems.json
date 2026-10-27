@@ -1,23 +1,5 @@
 [
   {
-    "id": "liteparse-tesseract",
-    "name": "LiteParse + Tesseract",
-    "kind": "staged",
-    "pipeline": "PDFium/raster + bundled Tesseract, layout by grid projection",
-    "runner": "runners/liteparse_system.py",
-    "needs": "liteparse",
-    "device": "native \u00b7 CPU \u00d74 (Tesseract)"
-  },
-  {
-    "id": "paddleocr-structure",
-    "name": "PaddleOCR PP-StructureV3",
-    "kind": "staged",
-    "pipeline": "layout detection \u2192 region OCR \u2192 table structure \u2192 reading order",
-    "runner": "runners/paddle_structure.py",
-    "needs": "paddleocr + paddlex[ocr]",
-    "device": "native \u00b7 CPU \u00d74 (mobile models)"
-  },
-  {
     "id": "glm-ocr",
     "name": "GLM-OCR",
     "kind": "vlm",
@@ -70,5 +52,23 @@
     "device": "remote \u00b7 GPU L4 (Modal)",
     "runner": "modal/mineru_gpu.py",
     "needs": "Modal app ocr-playground-mineru; MinerU 2.7.6, VLM backend"
+  },
+  {
+    "id": "liteparse-tesseract",
+    "name": "LiteParse + Tesseract",
+    "kind": "staged",
+    "pipeline": "PDFium/raster + bundled Tesseract, layout by grid projection",
+    "runner": "runners/liteparse_system.py",
+    "needs": "liteparse",
+    "device": "native \u00b7 CPU \u00d74 (Tesseract)"
+  },
+  {
+    "id": "paddleocr-structure",
+    "name": "PaddleOCR PP-StructureV3",
+    "kind": "staged",
+    "pipeline": "layout detection \u2192 region OCR \u2192 table structure \u2192 reading order",
+    "runner": "runners/paddle_structure.py",
+    "needs": "paddleocr + paddlex[ocr]",
+    "device": "native \u00b7 CPU \u00d74 (mobile models)"
   }
 ]

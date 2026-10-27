@@ -87,7 +87,7 @@ def test_health_reports_modes_and_limits(api) -> None:
     assert headers["Cache-Control"] == "no-store"
     health = payload(body)
     assert health["ok"] is True
-    assert health["default_mode"] == "glm"
+    assert health["default_mode"] == "chandra"
     modes = {mode["id"]: mode for mode in health["modes"]}
     assert tuple(modes) == (
         "glm", "fast", "chandra", "nemotron", "unlimited", "mineru", "paddle",
@@ -160,7 +160,8 @@ def test_an_unknown_mode_names_the_two_choices(api) -> None:
 def test_glm_without_an_endpoint_says_so_and_offers_the_fast_path(api, tmp_path) -> None:
     base, _ = api(rig=build_rig(tmp_path, glm_available=False))
     status, _, body = call(
-        base, "/api/parse", method="POST", body=b"x", headers={"Content-Type": "image/png"},
+        base, "/api/parse", method="POST", body=b"x",
+        headers={"Content-Type": "image/png", "X-Mode": "glm"},
     )
     assert status == 503
     assert payload(body)["error"] == (
@@ -171,7 +172,7 @@ def test_glm_without_an_endpoint_says_so_and_offers_the_fast_path(api, tmp_path)
 def test_a_busy_server_asks_the_client_to_retry(api) -> None:
     base, _ = api(service=StubService(document=sample_document()), slots=FakeSlots(grant=False))
     status, _, body = call(base, "/api/parse", method="POST", body=b"x",
-                           headers={"Content-Type": "image/png"})
+                           headers={"Content-Type": "image/png", "X-Mode": "glm"})
     assert status == 503
     assert payload(body) == {"error": "busy, try again in a moment"}
 
@@ -182,7 +183,7 @@ def test_the_parse_slot_is_always_released(api) -> None:
                           slots=slots)
 
     status, _, _ = call(base, "/api/parse", method="POST", body=b"x",
-                        headers={"Content-Type": "image/png"})
+                        headers={"Content-Type": "image/png", "X-Mode": "glm"})
     assert status == 500
 
     deadline = time.monotonic() + 2
@@ -192,7 +193,7 @@ def test_the_parse_slot_is_always_released(api) -> None:
 
     container.read_document.override(StubService(document=sample_document()))
     status, _, _ = call(base, "/api/parse", method="POST", body=b"x",
-                        headers={"Content-Type": "image/png"})
+                        headers={"Content-Type": "image/png", "X-Mode": "glm"})
     assert status == 200, "the next upload must still be served"
 
 
@@ -219,19 +220,22 @@ def test_a_non_ascii_filename_survives_percent_encoding(api, png_bytes) -> None:
     base, _ = api(service=stub)
     call(
         base, "/api/parse", method="POST", body=png_bytes,
-        headers={"Content-Type": "image/png",
+        headers={"Content-Type": "image/png", "X-Mode": "fast",
                  "X-Filename": urllib.parse.quote("扫描.pdf", safe="")},
     )
     assert stub.calls[0][0].name == "扫描.pdf"
 
 
-def test_no_mode_means_glm(api, png_bytes) -> None:
+def test_no_mode_means_chandra(api, png_bytes) -> None:
+    from ocr_playground.infrastructure.engines import CHANDRA_SPEC
+
     stub = StubService(document=sample_document())
+    stub.require_mode = lambda mode: type("Engine", (), {"spec": CHANDRA_SPEC})()
     base, _ = api(service=stub, glm_base_url="http://stub/v1")
     status, _, _ = call(base, "/api/parse", method="POST", body=png_bytes,
                         headers={"Content-Type": "image/png"})
     assert status == 200
-    assert stub.calls[0][1] == "glm"
+    assert stub.calls[0][1] == "chandra"
 
 
 def test_a_trailing_slash_on_the_endpoint_is_ignored(api) -> None:
@@ -255,7 +259,7 @@ def test_reading_failures_map_to_status_codes(api, png_bytes, error, expected_st
                                               expected_error) -> None:
     base, _ = api(service=StubService(error=error))
     status, _, body = call(base, "/api/parse", method="POST", body=png_bytes,
-                           headers={"Content-Type": "image/png"})
+                           headers={"Content-Type": "image/png", "X-Mode": "glm"})
     assert status == expected_status
     assert payload(body) == {"error": expected_error}
 
@@ -276,7 +280,7 @@ def test_a_truncated_upload_is_reported_not_parsed(api) -> None:
     with socket.create_connection((host, int(port)), timeout=5) as connection:
         connection.sendall(
             b"POST /api/parse HTTP/1.1\r\nHost: test\r\nContent-Type: image/png\r\n"
-            b"Content-Length: 100\r\n\r\nonly-ten-b"
+            b"X-Mode: glm\r\nContent-Length: 100\r\n\r\nonly-ten-b"
         )
         connection.shutdown(socket.SHUT_WR)
         chunks = []
@@ -327,7 +331,7 @@ def test_the_intent_ping_starts_the_gpu(api):
     base, container = api(glm_base_url="http://127.0.0.1:9/v1")
     container.warmer.override(warmer_for(engine, jobs))
 
-    status, headers, body = call(base, "/api/warm", method="POST")
+    status, headers, body = call(base, "/api/warm", method="POST", headers={"X-Mode": "glm"})
 
     assert status == 200, body
     assert json.loads(body) == {"warm": "started"}
@@ -340,8 +344,8 @@ def test_a_second_ping_inside_the_interval_costs_nothing(api):
     base, container = api(glm_base_url="http://127.0.0.1:9/v1")
     container.warmer.override(warmer_for(FakeWarmEngine(GLM), [], min_interval_seconds=300))
 
-    first = json.loads(call(base, "/api/warm", method="POST")[2])
-    second = json.loads(call(base, "/api/warm", method="POST")[2])
+    first = json.loads(call(base, "/api/warm", method="POST", headers={"X-Mode": "glm"})[2])
+    second = json.loads(call(base, "/api/warm", method="POST", headers={"X-Mode": "glm"})[2])
 
     assert first == {"warm": "started"}
     assert second == {"warm": "throttled"}
@@ -373,7 +377,7 @@ def test_the_intent_ping_is_a_post_only(api):
 
 
 def test_warming_an_unconfigured_engine_is_refused(api):
-    base, _ = api()  # no GLM_OCR_BASE_URL, and GLM is the default mode
+    base, _ = api()  # no CHANDRA_OCR_BASE_URL, and Chandra is the default mode
     status, _, body = call(base, "/api/warm", method="POST")
     assert status == 503
     assert "not configured" in json.loads(body)["error"]

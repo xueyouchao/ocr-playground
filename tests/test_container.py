@@ -26,7 +26,7 @@ def test_defaults_resolve_without_bootstrapping() -> None:
     container = Container()
     settings = container.settings()
 
-    assert settings.default_mode == "glm"
+    assert settings.default_mode == "chandra"
     assert settings.max_pages == 5
     assert settings.max_upload_bytes == 20 * 1024 * 1024
     assert settings.glm_base_url == ""
@@ -81,7 +81,7 @@ def test_the_registry_is_derived_from_the_wired_engines() -> None:
     )
     assert registry_.spec("glm").id == "glm-ocr"
     assert registry_.spec("glm").name == "GLM-OCR"
-    assert registry_.default_mode == "glm"
+    assert registry_.default_mode == "chandra"
 
 
 def test_each_vlm_endpoint_is_its_own_mode() -> None:
@@ -149,7 +149,7 @@ def test_the_use_case_takes_its_budget_and_page_cap_from_configuration(tmp_path)
 def test_settings_default_to_the_deployment_values() -> None:
     assert Settings().max_pages == 5
     assert Settings().preview_max_px == 1400
-    assert Settings.from_mapping({}).default_mode == "glm"
+    assert Settings.from_mapping({}).default_mode == "chandra"
 
 
 # --- pre-warming the GPU ---------------------------------------------------------------

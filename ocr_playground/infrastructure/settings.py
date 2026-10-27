@@ -49,7 +49,9 @@ class Settings:
     preview_max_px: int = 1400
     preview_quality: int = 78
 
-    default_mode: str = "glm"
+    # Chandra is the default reading. The page falls back to the first configured parser when its
+    # endpoint is absent, so a deployment without Chandra still works.
+    default_mode: str = "chandra"
     lit_path: str = ""
 
     # Pre-warming the GPU before an upload. Each warm is minutes of billed GPU time (boot plus

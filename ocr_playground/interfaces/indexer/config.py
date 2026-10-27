@@ -40,14 +40,17 @@ class IndexerConfig:
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> IndexerConfig:
         values = os.environ if env is None else env
+        chandra_configured = bool(values.get("CHANDRA_OCR_BASE_URL", "").strip())
         glm_configured = bool(values.get("GLM_OCR_BASE_URL", "").strip())
         return cls(
             corpus=Path(values.get("OCR_CORPUS", "corpus")).resolve(),
             out=Path(values.get("OCR_OUT", "out")),
             db=Path(values.get("OCR_DB", "cocoindex.db")),
-            # A run with no endpoint named stays on the free CPU path; naming glm without one is an
-            # error, not a silent downgrade.
-            mode=values.get("OCR_MODE", "").strip().lower() or ("glm" if glm_configured else "fast"),
+            # The uploader defaults to Chandra; the indexer follows the same preference among
+            # configured endpoints, and stays on the free CPU path when none is named. Naming a mode
+            # whose endpoint is absent is an error, not a silent downgrade.
+            mode=values.get("OCR_MODE", "").strip().lower()
+            or ("chandra" if chandra_configured else "glm" if glm_configured else "fast"),
             # 0 means every page.
             max_pages=int(values.get("OCR_MAX_PAGES", "0")),
         )

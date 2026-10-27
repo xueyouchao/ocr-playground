@@ -265,8 +265,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     container = build_container()
     settings = container.settings()
     httpd = UploadHTTPServer((args.host, args.port), Handler, container)
-    glm_state = settings.glm_base_url or "not configured (fast only)"
+    available = container.engines()[settings.default_mode].available
+    state = "configured" if available else "not configured; the page falls back"
     print(f"ocr-playground api on http://{args.host}:{args.port}", flush=True)
-    print(f"  default: {settings.default_mode} — {glm_state}", flush=True)
+    print(f"  default: {settings.default_mode} — {state}", flush=True)
     print(f"  lit: {settings.lit_path}", flush=True)
     httpd.serve_forever()
