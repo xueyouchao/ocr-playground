@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from fakes import GLM, FakeEngine, build_rig
+from fakes import FAST, GLM, FakeEngine, build_rig
 from ocr_playground.application.errors import (
     ClientGone,
     EngineFailure,
@@ -257,6 +257,38 @@ class Parked:
         while not (cancel and cancel()):
             time.sleep(0.01)
         raise ClientGone()
+
+
+class Deaf:
+    """A row parked inside a request it cannot interrupt — an upload already on the wire.
+
+    It notices nothing, not even the token; only a wait that harvests in arrival order can surface a
+    cancellation that another row has already reported.
+    """
+
+    spec = GLM
+    available = True
+
+    def identity(self) -> str:
+        return "deaf"
+
+    def read(self, page: PageImage, deadline: float | None, cancel=None) -> str:
+        time.sleep(2.0)
+        return "too late to matter"
+
+
+def test_a_cancellation_is_not_queued_behind_a_deaf_engine(tmp_path, png_bytes) -> None:
+    """Greptile's case: the first engine is stuck in a request, a later one says the client is gone.
+    Waiting in request order would sit on the first engine for the whole budget."""
+    started = time.monotonic()
+    rig = build_rig(tmp_path, pages=1)
+    rig.service._engines["glm"] = Deaf()
+    rig.service._engines["fast"] = FakeEngine(FAST, error=ClientGone())
+
+    with pytest.raises(ClientGone):
+        rig.service.execute(source(png_bytes), "glm,fast")
+
+    assert time.monotonic() - started < 1.5, "the cancellation waited behind the deaf engine"
 
 
 def test_a_parked_engine_does_not_hold_the_request_after_the_client_leaves(

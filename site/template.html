@@ -1179,9 +1179,16 @@ $("mode-checks").addEventListener("change", (event) => {
   uploadStatus(modeNote(state.modes));
 });
 
+// The upload in flight, so a second one can abandon it. The server stops working the moment the
+// request is closed, which is the difference between a retry queueing and a retry paying twice.
+let uploadInFlight = null;
+
 async function readUpload(file) {
   // The request's own parsers, not the picker's: the picker is disabled, but health may still land.
   const modes = state.modes.slice();
+  if (uploadInFlight) uploadInFlight.abort();
+  uploadInFlight = new AbortController();
+  const signal = uploadInFlight.signal;
   setUploadBusy(true);
   const started = Date.now();
   const ticker = setInterval(() => {
@@ -1197,6 +1204,7 @@ async function readUpload(file) {
         "X-Mode": modes.join(","),
       },
       body: file,
+      signal,
     });
     const body = await response.json().catch(() => ({ error: response.statusText }));
     if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
@@ -1218,15 +1226,26 @@ async function readUpload(file) {
       + (silent ? ` · ${silent} could not read it` : ""));
     render();
   } catch (error) {
+    if (error.name === "AbortError") {
+      // Replaced by a newer upload (or the tab is closing): say nothing, the new one is on screen.
+      return;
+    }
     const hint = !modes.includes("fast")
       ? " — or tick LiteParse + Tesseract, the fast option."
       : "";
     uploadStatus(`could not read that file — ${error.message}${hint}`, true);
   } finally {
     clearInterval(ticker);
+    if (!signal.aborted) uploadInFlight = null;
     setUploadBusy(false);
   }
 }
+
+window.addEventListener("pagehide", () => {
+  // Closing the tab abandons the parse too; without this the socket lingers until the browser gets
+  // around to it, and the server keeps paying for a page nobody will read.
+  if (uploadInFlight) uploadInFlight.abort();
+});
 
 $("read-file").addEventListener("click", () => {
   const file = $("file").files[0];

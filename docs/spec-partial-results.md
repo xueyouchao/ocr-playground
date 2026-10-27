@@ -79,8 +79,10 @@ Rules:
   → `done`. Events for page N+1 may not start before page N's cells are all emitted, so the page can
   keep the current "one page at a time" mental model. (Engines are already fanned out per page, not
   across pages.)
-- **Cancellation.** `ClientGone` (already implemented) stops the stream where it is; the page's existing
-  `AbortController` is the client side of it.
+- **Cancellation.** The server side is already in place: `ClientGone` stops the fan-out. The client side
+  is the `AbortController` the page now creates per upload (see *Page changes*), and a stream inherits
+  it: `abort()` closes the socket, the handler's probe sees EOF, the stream ends with no `done` event,
+  which is how the page tells a cancelled stream from a finished one.
 
 ## Server changes
 
@@ -95,8 +97,14 @@ Rules:
 
 ## Page changes
 
-`site/template.html` (built into `site/index.html` by `make site`):
+`site/template.html` (built into `site/index.html` by `make site`). The first item is already done:
 
+- **The `AbortController` and its `signal` are a page change, not an existing feature.** Until this
+  change the upload `fetch` had no `signal`, so nothing the page did could close the request; only the
+  browser closing the tab did, and only when it got round to it. The page now creates one controller per
+  upload, aborts the previous upload when a new one starts, and aborts on `pagehide`. This is what makes
+  the server-side cancellation reachable at all — and it is what stops a retry from queueing behind the
+  upload it replaced.
 - Add `Accept: application/x-ndjson` to the upload `fetch`, then read `response.body.getReader()` and
   split on `\n`, feeding events into the same render path that consumes `body.systems` /
   `body.pages[*].cells` today.
@@ -112,6 +120,7 @@ Rules:
 | A proxy idle timeout cuts a long stream | Panes hang mid-page | 15 s `ping` events |
 | Doubled code paths (JSON and NDJSON) | The two drift apart | One serializer in `evidence.py`, and the existing handler tests run parameterised over both `Accept` values |
 | Page reload loses the partial result | Old behaviour returns | Accepted for now; that is the job API's advantage, and the reason it stays the fallback |
+| A cancelled stream looks like a short one | The page could render a half-filled comparison as complete | No `done` event means cancelled: the page keeps the panes it has and says the rest was abandoned |
 | `parse_slots` held for the whole stream | Capacity semantics change quietly | Slot lifetime is already "the whole request"; make it explicit in the slot test |
 
 ## Tests

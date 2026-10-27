@@ -29,6 +29,10 @@ class Stub:
         self.drop_over: int | None = None
         self.drop_budget = 0
         self.dropped: list[str] = []
+        # A probe the edge holds open while a container boots, then drops without answering.
+        self.park_probes = 0
+        self.park_for = 0.0
+        self.parked: list[str] = []
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler(script))
         self.server.daemon_threads = True
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -61,6 +65,14 @@ class Stub:
                     self.connection.close()  # before the page is read: what the edge does
                     return
                 body = json.loads(self.rfile.read(length) or b"{}")
+                if stub.park_probes and not body.get("messages"):
+                    # Recorded before the hold: the client times out and carries on without us, so
+                    # the assertion must not race the sleep.
+                    stub.parked.append(self.path)
+                    stub.park_probes -= 1
+                    time.sleep(stub.park_for)
+                    self.close_connection = True
+                    return
                 stub.requests.append({"path": self.path, "body": body})
                 status, headers, payload = script(self.path, body)
                 encoded = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
@@ -256,6 +268,51 @@ def test_a_flapping_endpoint_is_not_handed_the_page_forever(endpoint, tmp_path) 
     assert len(stub.dropped) == MAX_UPLOADS, "the page is offered exactly MAX_UPLOADS times"
     assert len(stub.requests) == MAX_UPLOADS, "one kilobyte probe per attempt, then it stops"
     assert all(not request["body"].get("messages") for request in stub.requests)
+
+
+def test_a_probe_parked_by_the_edge_is_asked_again(endpoint, tmp_path, monkeypatch) -> None:
+    """The edge may hold a kilobyte open while a container boots. That is not an answer and not a
+    failure: the probe is asked again, and the page goes up once something answers."""
+    monkeypatch.setattr(vlm, "_PROBE_SLICE", 0.15)
+    cold = {"yes": True}
+
+    def script(path, body):
+        if cold["yes"] and body.get("messages"):
+            cold["yes"] = False
+            return 303, {"Location": "/cold"}, b""
+        if not body.get("messages"):
+            return 400, {}, {"error": "messages is required"}
+        return completion("read after a parked probe")
+
+    stub, engine = endpoint(script)
+    stub.park_probes, stub.park_for = 1, 0.4
+
+    assert engine.read(
+        page(tmp_path, b"png" + b"\0" * 4096), time.monotonic() + 30
+    ) == "read after a parked probe"
+    assert stub.parked == ["/cold"], "the probe was the thing the edge parked"
+    assert stub.requests[-1]["body"]["messages"], "the page went up once a container answered"
+
+
+def test_a_parked_probe_notices_a_client_that_left(endpoint, tmp_path, monkeypatch) -> None:
+    """A cancelled read must notice while it is parked, not after the edge finally answers."""
+    monkeypatch.setattr(vlm, "_PROBE_SLICE", 0.15)
+    started = time.monotonic()
+
+    def script(path, body):
+        if body.get("messages"):
+            return 303, {"Location": "/cold"}, b""
+        return 400, {}, {"error": "messages is required"}
+
+    stub, engine = endpoint(script)
+    stub.park_probes, stub.park_for = 5, 0.4
+
+    def cancel() -> bool:
+        return time.monotonic() - started > 0.05
+
+    with pytest.raises(ClientGone):
+        engine.read(page(tmp_path, b"png" + b"\0" * 4096), time.monotonic() + 30, cancel)
+    assert time.monotonic() - started < 1.0, "it sat on the parked probe instead of noticing"
 
 
 def test_a_cancelled_read_stops_walking_the_handoffs(endpoint, tmp_path) -> None:

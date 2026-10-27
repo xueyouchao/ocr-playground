@@ -8,7 +8,7 @@ the engine read, so what the browser shows is what was parsed.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 
 from ..domain.document import (
     DocumentPage,
@@ -23,6 +23,13 @@ from ..domain.ports import Cancel, Clock, PageOcr, PageRenderer, PreviewEncoder,
 from ..domain.reading import PageReading
 from ..domain.errors import UnknownMode
 from .errors import ApplicationError, ClientGone, EngineFailure, EngineUnavailable
+
+_CANCEL_POLL = 0.25
+"""How often the wait asks whether the client is still there.
+
+Short enough that closing the tab releases the parse slot promptly, long enough that a comparison
+of four engines does not spend the page spinning on a socket probe.
+"""
 
 
 def reading_note(engines: Sequence[PageOcr]) -> str:
@@ -182,15 +189,32 @@ class ReadDocumentService:
                     )
                     for engine in pending
                 }
-                for engine in pending:
-                    try:
-                        text = running[engine.spec.id].result()
-                    except ClientGone:
-                        raise  # nobody wants this page: stop the document, do not name a failure
-                    except Exception as error:  # noqa: BLE001 — see the docstring: partial is the point
-                        failed[engine.spec.id] = error
-                    else:
-                        readings.append(PageReading.of(engine.spec.id, text))
+                # Waiting in request order would hide a cancellation behind the first engine: a row
+                # parked in a request it cannot interrupt (an upload already on the wire) never sees
+                # the token, so the loop would sit on it for the whole budget while another row has
+                # already said the client is gone. So completion is harvested in arrival order and
+                # the token is asked while waiting; the readings are put back in request order below.
+                answers: dict[str, str] = {}
+                waiting = set(running.values())
+                while waiting:
+                    waiting = set(wait(waiting, timeout=_CANCEL_POLL).not_done)
+                    for engine in pending:
+                        future, engine_id = running[engine.spec.id], engine.spec.id
+                        if engine_id in answers or engine_id in failed or not future.done():
+                            continue
+                        try:
+                            answers[engine_id] = future.result()
+                        except ClientGone:
+                            raise  # nobody wants this page: stop the document, not a named failure
+                        except Exception as error:  # noqa: BLE001 — partial is the point
+                            failed[engine_id] = error
+                    if cancel is not None and cancel():
+                        raise ClientGone()
+                readings.extend(
+                    PageReading.of(engine.spec.id, answers[engine.spec.id])
+                    for engine in pending
+                    if engine.spec.id in answers
+                )
             except BaseException:
                 # A parked engine must not hold the request open after the client has gone; its own
                 # thread ends when its socket does, and nobody waits for it here.
