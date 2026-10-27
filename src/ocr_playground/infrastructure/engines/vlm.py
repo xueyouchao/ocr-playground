@@ -12,15 +12,19 @@ prompt below is therefore mostly an identity marker rather than an instruction (
 exception — it is a VLM with a real instruction, and the deployment's prompt is a setting).
 
 Modal answers a cold endpoint with a `303` to the same URL carrying an attempt token, and following
-that `Location` *is* the cold-start wait. The redirect is therefore followed by hand, re-sending the
-page: urllib would replay a `303` *as a GET, without the body*, which the wrappers — POST-only routes
-— can only answer with a 405, after paying for the whole boot. The budget is what bounds that loop;
-a handoff counter only stops a redirect *loop* from spinning.
+that `Location` *is* the cold-start wait. The redirect is therefore followed by hand: urllib would
+replay a `303` *as a GET, without the body*, which the wrappers — POST-only routes — can only answer
+with a 405, after paying for the whole boot. The page is not re-sent on that walk either — a cold edge
+answers from the request headers and drops a body still in flight (`Errno 32`) — so it is walked with
+a kilobyte until a container answers. The budget is the only bound: how many handoffs a boot needs is
+the edge's business.
 """
 from __future__ import annotations
 
 import base64
+import http.client
 import json
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -32,9 +36,15 @@ from ...domain.engine import EngineSpec
 
 # The statuses Modal uses to hand a cold request to the attempt URL that waits for the container.
 _HANDOFFS = (303, 307, 308)
-# Not the bound on a cold start — the deadline is. This only stops an endpoint that answers 303 in a
-# tight loop from spinning until the budget runs out.
-MAX_HANDOFFS = 64
+# A page that keeps dying on the wire is re-sent at most this often: each one is real GPU work, so a
+# flapping endpoint must not turn one upload into ten.
+MAX_UPLOADS = 6
+# A handoff is how a cold start reports progress, and how many there are is the edge's business: one
+# per attempt, over minutes, is legitimate. So the *budget* is the only bound on the chain; these
+# pauses only keep a broken edge from being dialled as fast as the socket allows (a hop carries a
+# kilobyte, and a hop that comes back in a millisecond is not a boot in progress).
+_HOP_PAUSE = 0.05
+_RETRY_PAUSE = 2.0
 
 GLM_SPEC = EngineSpec(
     id="glm-ocr",
@@ -176,12 +186,19 @@ class VlmEngine:
             }],
         }
         data = json.dumps(payload).encode()
+        # What loses a cold read is the upload, not the redirect: the edge answers a cold request
+        # from the headers alone and drops the connection while a multi-megabyte page is still going
+        # up, which the client sees as a broken pipe. So the page rides only a request that is
+        # expected to be served: a cold endpoint is first asked with a kilobyte, and the page goes up
+        # once a container has answered something.
+        ping = json.dumps({"model": self._model, "messages": []}).encode()
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self._api_key}"}
         url = self._base_url + "/chat/completions"
         budget = time.monotonic() + self._request_timeout * 4 if deadline is None else deadline
         opener = urllib.request.build_opener(_NoRedirect())
 
-        handoffs = 0
+        ready = True  # optimistic: an endpoint that is up answers the page straight away
+        uploads = failures = 0
         while True:
             remaining = budget - time.monotonic()
             if remaining <= 1:
@@ -189,11 +206,16 @@ class VlmEngine:
                     f"{self.spec.name} did not finish within the time limit — try again once the "
                     "GPU is warm, or use the fast option (LiteParse + Tesseract)"
                 )
-            request = urllib.request.Request(url, data=data, headers=headers)
+            if ready:
+                uploads += 1
+                if uploads > MAX_UPLOADS:
+                    raise EngineFailure(f"the {self.spec.name} endpoint kept dropping the page")
+            request = urllib.request.Request(
+                url, data=data if ready else ping, headers=headers, method="POST"
+            )
             try:
                 with opener.open(request, timeout=min(self._request_timeout, remaining)) as response:
-                    body = json.loads(response.read().decode())
-                break
+                    answer = json.loads(response.read().decode())
             except urllib.error.HTTPError as error:
                 # A cold start hands off however many times the container needs; only the budget,
                 # checked above, decides when that has gone on too long.
@@ -201,21 +223,44 @@ class VlmEngine:
                 detail = "" if location else error.read().decode(errors="replace")[:300]
                 error.close()
                 if location:
-                    handoffs += 1
-                    if handoffs >= MAX_HANDOFFS:
-                        raise EngineFailure(
-                            f"the {self.spec.name} endpoint kept redirecting"
-                        ) from error
                     # A relative Location is legal in HTTP; Modal sends an absolute one.
                     url = urllib.parse.urljoin(url, location)
+                    ready = False  # nothing is serving this yet, so stop sending the page
+                    left = budget - time.monotonic() - 1  # the hop may have used what was left
+                    if left > 0:
+                        time.sleep(min(_HOP_PAUSE, left))
+                    continue
+                if not ready:
+                    # A 400 to the kilobyte is still a container reading it, so one is serving now.
+                    ready, url = True, self._base_url + "/chat/completions"
                     continue
                 raise EngineFailure(
                     f"the {self.spec.name} endpoint answered {error.code}: {detail or 'no detail'}"
                 ) from error
-            except (TimeoutError, urllib.error.URLError) as error:
-                raise EngineTimeout(
-                    f"the {self.spec.name} endpoint did not answer: {error}"
-                ) from error
+            except (TimeoutError, OSError, http.client.HTTPException) as error:
+                if ready:  # the page died on the wire; say so, it is the interesting failure
+                    sys.stderr.write(
+                        f"{self.spec.id}: the page upload was dropped ({error}); retrying with a "
+                        "kilobyte until a container answers\n"
+                    )
+                ready, url = False, self._base_url + "/chat/completions"
+                failures += 1
+                # Back off: a boot is minutes long, so hammering it only wastes connections, while
+                # an endpoint that is genuinely gone should not be dialled 400 times.
+                pause = min(_RETRY_PAUSE * 2 ** min(failures - 1, 4), 30.0)
+                # The clock is read again here: the request that just failed may have eaten the rest
+                # of the budget, and a timeout the caller is waiting on must not be delayed by a sleep
+                # that was sized before the request ran.
+                left = budget - time.monotonic() - 1
+                if left > 0:
+                    time.sleep(min(pause, left))
+                continue
+
+            if not ready:
+                ready, url = True, self._base_url + "/chat/completions"
+                continue
+            body = answer
+            break
 
         try:
             content = body["choices"][0]["message"].get("content") or ""
