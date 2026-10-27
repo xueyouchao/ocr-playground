@@ -1,6 +1,6 @@
 """CocoIndex app: index a directory of documents with the same pipeline the page uploads through.
 
-`cocoindex update main.py` walks `OCR_CORPUS`, reads every PDF or image with the configured mode, and
+`cocoindex update scripts/index.py` walks `OCR_CORPUS`, reads every PDF or image with the configured mode, and
 declares the results under `OCR_OUT`:
 
     documents/<relative path>.json   one document: per-page text and counts, plus its digest

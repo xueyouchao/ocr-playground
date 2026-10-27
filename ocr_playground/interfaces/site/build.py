@@ -8,11 +8,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .layout import site
+
 
 def main(root: Path) -> None:
-    evidence = json.loads((root / "evidence.json").read_text(encoding="utf-8"))
+    directory = site(root)
+    evidence = json.loads((directory / "evidence.json").read_text(encoding="utf-8"))
     payload = json.dumps(evidence, ensure_ascii=False).replace("<", "\\u003c")
-    template = (root / "template.html").read_text(encoding="utf-8")
-    target = root / "index.html"
+    template = (directory / "template.html").read_text(encoding="utf-8")
+    target = directory / "index.html"
     target.write_text(template.replace("__EVIDENCE__", payload), encoding="utf-8")
     print(f"wrote {target} ({target.stat().st_size:,} bytes)")

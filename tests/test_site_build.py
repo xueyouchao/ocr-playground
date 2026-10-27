@@ -32,11 +32,14 @@ TEMPLATE = "<script>const DATA = __EVIDENCE__;</script>"
 
 
 def build_site(tmp_path: Path, records: dict[str, dict[str, str | None]]) -> Path:
-    (tmp_path / "records").mkdir()
-    (tmp_path / "systems.json").write_text(json.dumps(SYSTEMS), encoding="utf-8")
+    (tmp_path / "data" / "records").mkdir(parents=True)
+    (tmp_path / "site").mkdir()
+    (tmp_path / "data" / "systems.json").write_text(json.dumps(SYSTEMS), encoding="utf-8")
     for name, pages in records.items():
-        (tmp_path / "records" / f"{name}.json").write_text(json.dumps(pages), encoding="utf-8")
-    (tmp_path / "template.html").write_text(TEMPLATE, encoding="utf-8")
+        (tmp_path / "data" / "records" / f"{name}.json").write_text(
+            json.dumps(pages), encoding="utf-8"
+        )
+    (tmp_path / "site" / "template.html").write_text(TEMPLATE, encoding="utf-8")
 
     site_collect.main(tmp_path)
     site_build.main(tmp_path)
@@ -44,13 +47,13 @@ def build_site(tmp_path: Path, records: dict[str, dict[str, str | None]]) -> Pat
 
 
 def test_the_offline_comparison_opens_with_chandra_and_nemotron() -> None:
-    systems = json.loads((ROOT / "systems.json").read_text(encoding="utf-8"))
+    systems = json.loads((ROOT / "data" / "systems.json").read_text(encoding="utf-8"))
 
     assert [system["id"] for system in systems[:2]] == ["chandra-2", "nemotron-parse"]
 
 
 def test_the_two_cpu_systems_render_last() -> None:
-    systems = json.loads((ROOT / "systems.json").read_text(encoding="utf-8"))
+    systems = json.loads((ROOT / "data" / "systems.json").read_text(encoding="utf-8"))
 
     assert [system["id"] for system in systems[-2:]] == [
         "liteparse-tesseract", "paddleocr-structure",
@@ -62,7 +65,7 @@ def test_evidence_joins_records_against_the_roster(tmp_path) -> None:
         "a": {"page-1": "one"},
         "b": {"page-1": "<b>two</b>", "page-2": "3 4"},
     })
-    evidence = json.loads((out / "evidence.json").read_text(encoding="utf-8"))
+    evidence = json.loads((out / "site" / "evidence.json").read_text(encoding="utf-8"))
 
     assert evidence["document"] == {
         "name": "efda8b60…a8a9.pdf",
@@ -78,7 +81,7 @@ def test_evidence_joins_records_against_the_roster(tmp_path) -> None:
 
 def test_a_parser_that_did_not_run_is_null_not_zero(tmp_path) -> None:
     out = build_site(tmp_path, {"a": {"page-1": "one"}, "b": {"page-1": "two", "page-2": "three"}})
-    pages = json.loads((out / "evidence.json").read_text(encoding="utf-8"))["pages"]
+    pages = json.loads((out / "site" / "evidence.json").read_text(encoding="utf-8"))["pages"]
 
     assert pages[0]["cells"]["a"]["text"] == "one"
     assert pages[0]["cells"]["a"]["chars"] == 3
@@ -89,7 +92,7 @@ def test_a_parser_that_did_not_run_is_null_not_zero(tmp_path) -> None:
 
 def test_counts_travel_with_the_text(tmp_path) -> None:
     out = build_site(tmp_path, {"a": {"page-1": "abc 12 34.5"}})
-    cell = json.loads((out / "evidence.json").read_text(encoding="utf-8"))["pages"][0]["cells"]["a"]
+    cell = json.loads((out / "site" / "evidence.json").read_text(encoding="utf-8"))["pages"][0]["cells"]["a"]
     assert cell["chars"] == 11
     assert cell["tokens"] == 3
     assert cell["numeric_share"] == 0.667
@@ -104,7 +107,7 @@ def test_collect_says_which_parsers_ran_where(tmp_path, capsys) -> None:
 
 def test_build_inlines_the_evidence_and_escapes_angle_brackets(tmp_path) -> None:
     out = build_site(tmp_path, {"a": {"page-1": "</script><script>alert(1)</script>"}})
-    page = (out / "index.html").read_text(encoding="utf-8")
+    page = (out / "site" / "index.html").read_text(encoding="utf-8")
 
     assert page.startswith("<script>const DATA = ")
     assert "</script><script>alert(1)" not in page, "parser output must not close the tag it lives in"
@@ -119,7 +122,7 @@ def test_the_static_measure_is_the_domain_measure() -> None:
     assert site_collect.measure(None) == {"chars": None, "tokens": None, "numeric_share": None}
 
 
-@pytest.mark.parametrize("shim", ["collect.py", "build.py", "prepare.py", "api/server.py"])
+@pytest.mark.parametrize("shim", ["scripts/collect.py", "scripts/build.py", "scripts/prepare.py", "api/server.py"])
 def test_every_entry_shim_imports_cleanly(shim) -> None:
     # `run_name="not_main"` imports the shim without running its main(); this is what proves the
     # sys.path juggling still finds the package when the script is run from its own directory.
@@ -130,7 +133,7 @@ def test_every_entry_shim_imports_cleanly(shim) -> None:
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("shim", ["prepare.py", "api/server.py"])
+@pytest.mark.parametrize("shim", ["scripts/prepare.py", "api/server.py"])
 def test_the_cli_shims_answer_help(shim) -> None:
     result = subprocess.run([sys.executable, shim, "--help"], cwd=ROOT,
                             capture_output=True, text=True)
@@ -140,7 +143,7 @@ def test_the_cli_shims_answer_help(shim) -> None:
 
 def test_the_page_warms_the_gpu_on_intent_not_on_arrival() -> None:
     """A warm GPU bills from boot until it scales down, so a page view alone must not rent one."""
-    template = (ROOT / "template.html").read_text()
+    template = (ROOT / "site" / "template.html").read_text()
     assert 'const WARM_API = "/api/warm";' in template
     assert '"pointerenter", warmGpu' in template
     assert '"focusin", warmGpu' in template
@@ -154,7 +157,7 @@ def test_the_page_warms_the_gpu_on_intent_not_on_arrival() -> None:
 
 def test_the_picker_can_ask_for_a_comparison() -> None:
     """Several parsers at once: checkboxes, a comma-joined header, and a footer that names them all."""
-    template = (ROOT / "template.html").read_text()
+    template = (ROOT / "site" / "template.html").read_text()
 
     assert 'id="mode-checks"' in template
     assert template.count('type="checkbox"') >= 2
@@ -168,7 +171,7 @@ def test_the_picker_can_ask_for_a_comparison() -> None:
 
 def test_the_mode_fallback_only_picks_a_parser_that_can_run() -> None:
     """Two ways the picker could quietly fight the visitor; both are one line each."""
-    template = (ROOT / "template.html").read_text()
+    template = (ROOT / "site" / "template.html").read_text()
     body = template[template.index("async function loadModes"):]
     body = body[: body.index("\n}\n")]
 
@@ -184,7 +187,7 @@ def test_the_mode_fallback_only_picks_a_parser_that_can_run() -> None:
 
 def test_the_night_theme_is_chosen_before_the_first_paint() -> None:
     """Night must not start as a flash of white: the palette is picked in <head>, not on load."""
-    template = (ROOT / "template.html").read_text()
+    template = (ROOT / "site" / "template.html").read_text()
     head = template[: template.index("</head>")]
 
     assert 'document.documentElement.dataset.theme' in head
@@ -192,7 +195,7 @@ def test_the_night_theme_is_chosen_before_the_first_paint() -> None:
 
 
 def test_the_night_theme_is_a_palette_swap_not_a_second_page() -> None:
-    template = (ROOT / "template.html").read_text()
+    template = (ROOT / "site" / "template.html").read_text()
 
     assert ':root[data-theme="dark"]' in template
     # Every surface the day theme paints white is a variable; one hard-coded white card is a lit
@@ -206,7 +209,7 @@ def test_the_night_theme_is_a_palette_swap_not_a_second_page() -> None:
 
 def test_the_night_theme_reaches_into_the_previews() -> None:
     """A preview is its own document, so it inherits neither the palette nor the mark ink."""
-    template = (ROOT / "template.html").read_text()
+    template = (ROOT / "site" / "template.html").read_text()
 
     assert "PREVIEW_DARK_STYLE" in template
     assert "${previewStyle()}" in template
@@ -217,7 +220,7 @@ def test_the_night_theme_reaches_into_the_previews() -> None:
 
 def test_a_refused_storage_write_cannot_freeze_the_toggle() -> None:
     """The applied theme is held in memory; storage is only how it survives a reload."""
-    template = (ROOT / "template.html").read_text()
+    template = (ROOT / "site" / "template.html").read_text()
     body = template[template.index("function currentTheme"):]
     body = body[: body.index("\n}\n")]
 
@@ -226,3 +229,11 @@ def test_a_refused_storage_write_cannot_freeze_the_toggle() -> None:
     # same theme again.
     assert "chosenTheme" in body, "the current theme must not be read back from storage"
     assert "localStorage" not in body
+
+
+def test_every_record_writer_agrees_with_the_build() -> None:
+    """One module names the layout: a runner writing elsewhere would publish stale runs silently."""
+    from ocr_playground.interfaces.site.layout import data
+    from runners._common import RECORDS
+
+    assert RECORDS == data(ROOT) / "records"

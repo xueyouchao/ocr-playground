@@ -45,16 +45,16 @@ and the terms under which you run them; check the project before shipping anythi
 Model weights are downloaded at run time onto Modal volumes. None are redistributed here; the model
 card of each one is the place to look for its terms.
 
-## Outputs in `records/`
+## Outputs in `data/records/`
 
-`records/<id>.json` holds each system's reading of the bundled sample, verbatim, as the audit trail.
+`data/records/<id>.json` holds each system's reading of the bundled sample, verbatim, as the audit trail.
 For Nemotron 3.5 Parse, OpenMDW-1.1 places no conditions on those outputs (quoted above). For the
 others, their own terms apply.
 
 ## The bundled sample document
 
-`corpus/document.pdf` is the six-page scan every parser reads, and the source of the page renders in
-`assets/pages/`, so the same terms apply to both.
+`data/corpus/document.pdf` is the six-page scan every parser reads, and the source of the page renders in
+`site/pages/`, so the same terms apply to both.
 
 Its metadata does not identify the underlying report. The bundled copy was rebuilt by
 `ocrmypdf 13.4.3 / Tesseract OCR-PDF v5.2.0` on 2023-10-18 (modified 2023-11-13) and written out by
@@ -68,5 +68,5 @@ one that can.
 
 ## The page itself
 
-`index.html` is a single file with inline CSS and JavaScript. It loads no third-party fonts,
+`site/index.html` is a single file with inline CSS and JavaScript. It loads no third-party fonts,
 libraries or network resources; the only images are the page renders derived from the sample above.

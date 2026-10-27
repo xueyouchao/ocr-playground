@@ -1,6 +1,6 @@
 """Render the sample PDF's pages with poppler, so the shootout needs no Python PDF library.
 
-    python prepare.py [--dpi 200] [--pdf path]
+    python scripts/prepare.py [--dpi 200] [--pdf path]
 
 Two renders: 200 dpi pages for the parsers, 110 dpi JPEG previews for the page's own rail. poppler
 writes both directly, so there is no PIL dependency.
@@ -13,6 +13,8 @@ import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
+from .layout import data, site
+
 OUT = Path("/tmp/ocr-playground/pages")
 
 
@@ -23,7 +25,7 @@ def _page_order(path: Path) -> int:
 def main(root: Path, argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dpi", type=int, default=200)
-    parser.add_argument("--pdf", default=str(root / "corpus" / "document.pdf"))
+    parser.add_argument("--pdf", default=str(data(root) / "corpus" / "document.pdf"))
     args = parser.parse_args(argv)
 
     if OUT.exists():
@@ -35,7 +37,7 @@ def main(root: Path, argv: Sequence[str] | None = None) -> None:
     pages = sorted(OUT.glob("page-*.png"), key=_page_order)
     print(f"{len(pages)} pages at {args.dpi} dpi in {OUT}")
 
-    previews = root / "assets" / "pages"
+    previews = site(root) / "pages"
     if previews.exists():
         shutil.rmtree(previews)
     previews.mkdir(parents=True)
