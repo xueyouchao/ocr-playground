@@ -101,16 +101,17 @@ class _Pipeline:
         self.path: Path | None = None
         self.payload = b""
 
-    def predict(self, path):
+    def predict(self, path, **options):
         self.path = Path(path)
         self.payload = self.path.read_bytes()
         return [_Result(self.markdown)]
 
 
 def test_read_page_writes_the_exact_bytes_and_returns_markdown() -> None:
-    pipeline = _Pipeline({"markdown_texts": "# page one"})
+    markdown = "# page one " + "text " * 10
+    pipeline = _Pipeline({"markdown_texts": markdown})
 
-    assert wrapper.read_page(pipeline, PNG) == "# page one"
+    assert wrapper.read_page(pipeline, PNG) == markdown
     assert pipeline.payload == PNG
     assert pipeline.path is not None
     assert pipeline.path.suffix == ".png"
@@ -127,7 +128,7 @@ def test_read_page_keeps_the_jpeg_suffix_and_holds_the_lock() -> None:
             seen["locked"] = lock.locked()
             return super().predict(path)
 
-    assert wrapper.read_page(Probe({"markdown_texts": "x"}), JPEG, lock) == "x"
+    assert wrapper.read_page(Probe({"markdown_texts": "x " * 20}), JPEG, lock) == "x " * 20
     assert seen == {"suffix": ".jpg", "locked": True}
     assert not lock.locked(), "the lock is released even though the page raised nothing"
 
@@ -135,3 +136,73 @@ def test_read_page_keeps_the_jpeg_suffix_and_holds_the_lock() -> None:
 def test_markdown_text_accepts_a_plain_string_result() -> None:
     assert wrapper.markdown_text(_Result("# raw markdown")) == "# raw markdown"
     assert wrapper.markdown_text(_Result({"markdown_texts": ""})) == ""
+
+
+class _Sequence:
+    """A pipeline that returns one reading per call and remembers each payload and option set."""
+
+    def __init__(self, *readings: str) -> None:
+        self.readings = list(readings)
+        self.payloads: list[bytes] = []
+        self.calls: list[dict] = []
+
+    def predict(self, path, **options):
+        self.payloads.append(Path(path).read_bytes())
+        self.calls.append(options)
+        return [_Result(self.readings[len(self.payloads) - 1])]
+
+
+def test_visible_characters_ignore_markup_and_placeholders() -> None:
+    placeholder = '<div style="text-align: center;"><img src="imgs/box.jpg" alt="Image" /></div>'
+
+    assert wrapper.visible_characters(placeholder) == 0
+    assert wrapper.visible_characters("# 19950826 I1.FDIR T.S. IRIS Ferry") > wrapper.MIN_TEXT
+
+
+def test_a_page_with_text_is_not_retried() -> None:
+    pipeline = _Sequence("# " + "page text " * 12)
+
+    def invert(payload):
+        raise AssertionError("a page with text must not be inverted")
+
+    assert wrapper.read_page(pipeline, PNG, invert=invert).startswith("# page text")
+    assert pipeline.payloads == [PNG]
+    assert pipeline.calls == [{}], "a normal page keeps the default detector limit"
+
+
+def test_a_page_with_no_text_is_retried_inverted() -> None:
+    pipeline = _Sequence("", "# recovered text from the light version")
+
+    assert wrapper.read_page(pipeline, PNG, invert=lambda payload: b"INVERTED") == (
+        "# recovered text from the light version"
+    )
+    assert pipeline.payloads == [PNG, b"INVERTED"]
+
+
+def test_a_retry_that_finds_less_keeps_the_first_reading() -> None:
+    placeholder = '<div style="text-align: center;"><img src="imgs/box.jpg" /></div>'
+    pipeline = _Sequence(placeholder, "", "")
+
+    assert wrapper.read_page(pipeline, PNG, invert=lambda payload: b"INVERTED", ocr=lambda p: "") == placeholder
+
+
+def test_a_page_that_cannot_be_inverted_keeps_the_first_reading() -> None:
+    placeholder = '<div style="text-align: center;"><img src="imgs/box.jpg" /></div>'
+    pipeline = _Sequence(placeholder, "")
+
+    assert wrapper.read_page(pipeline, PNG, invert=lambda payload: None, ocr=lambda p: "") == placeholder
+    assert pipeline.payloads == [PNG]
+
+
+def test_a_page_with_no_document_text_falls_back_to_plain_ocr() -> None:
+    pipeline = _Sequence("# Using the model")
+
+    text = wrapper.read_page(
+        pipeline,
+        PNG,
+        invert=lambda payload: None,
+        ocr=lambda payload: "# " + "screenshot body text " * 50,
+    )
+
+    assert text.startswith("# screenshot body text")
+    assert pipeline.payloads == [PNG], "the layout pass is not repeated for the OCR fallback"

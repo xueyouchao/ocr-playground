@@ -7,6 +7,13 @@ assembled. So this wrapper writes the posted page to a scratch file, runs the pi
 returns `result.markdown["markdown_texts"]` — the same call the batch probe in
 `paddle_structure_gpu.py` makes, one page at a time.
 
+A screenshot of an application is outside the layout model's world: PP-DocLayout-L classifies the whole
+page as one image, no text block reaches OCR, and only a stray title survives. A dark page (a dark-mode
+screenshot, or a white-on-black scan) fails the same way. When the layout reading has almost no text,
+the wrapper retries: first inverted if the page is dark, then with OCR alone — PP-OCRv5 detection and
+recognition at a 2560 px side limit, so the small text of a 1920 px screenshot is not halved away — and
+keeps whichever reading has more text. Pages that already read take only the first pass.
+
 Server models rather than the mobile set: the CPU row in this shootout fell back to
 `PP-DocLayout-S` / `PP-OCRv5_mobile_*` to get under a minute a page, so those are the models a CPU
 box can afford, not the pipeline's own. On this app's A10G (24 GB, the class the other rows run on
@@ -17,8 +24,11 @@ what PP-StructureV3 is meant to run.
     PADDLE_OCR_BASE_URL=https://…/v1 make api
 """
 import base64
+import re
 import tempfile
+import threading
 from contextlib import nullcontext
+from io import BytesIO
 from pathlib import Path
 
 import modal
@@ -38,6 +48,7 @@ image = (
         "paddlex[ocr]==3.7.2",
         "fastapi[standard]==0.162.0",
         "pydantic==2.14.1",
+        "pillow==12.1.0",
     )
 )
 
@@ -62,8 +73,38 @@ def markdown_text(result) -> str:
     return markdown.get("markdown_texts", "") if isinstance(markdown, dict) else str(markdown or "")
 
 
-def read_page(pipeline, payload: bytes, lock=None) -> str:
-    """Run one page and return its markdown; the scratch file is gone before the caller sees it."""
+_TAG = re.compile(r"<[^>]+>")
+MIN_TEXT = 20
+DARK_MEAN = 110
+# PP-OCRv5's detector defaults to a 960 px side limit. A 1920 px browser screenshot is halved there,
+# and 12-14 px body text is then too small to detect; 2560 keeps 4K screenshots above that floor too.
+MAX_TEXT_SIDE = 2560
+
+
+def visible_characters(text: str) -> int:
+    """Letters and digits outside HTML tags: a placeholder `<img>` counts as no text."""
+    return sum(character.isalnum() for character in _TAG.sub(" ", text))
+
+
+def invert_dark_page(payload: bytes) -> bytes | None:
+    """The page as a light one, or None when it is already light or cannot be decoded."""
+    try:
+        from PIL import Image, ImageOps, ImageStat
+    except ImportError:  # pragma: no cover - the wrapper image pins Pillow
+        return None
+    try:
+        with Image.open(BytesIO(payload)) as source:
+            rgb = source.convert("RGB")
+            if ImageStat.Stat(rgb.convert("L").resize((64, 64))).mean[0] >= DARK_MEAN:
+                return None
+            buffer = BytesIO()
+            ImageOps.invert(rgb).save(buffer, format="PNG")
+            return buffer.getvalue()
+    except Exception:
+        return None
+
+
+def _predict(pipeline, payload: bytes, lock=None) -> str:
     suffix = ".jpg" if payload.startswith(b"\xff\xd8") else ".png"
     with tempfile.TemporaryDirectory() as scratch:
         page = Path(scratch) / f"page{suffix}"
@@ -71,6 +112,61 @@ def read_page(pipeline, payload: bytes, lock=None) -> str:
         with (lock or nullcontext()):
             result = pipeline.predict(str(page))[0]
     return markdown_text(result)
+
+
+_ocr = None
+_ocr_build = threading.Lock()
+
+
+def load_ocr():
+    """PP-OCRv5 without layout, built on the first page that needs it."""
+    global _ocr
+    with _ocr_build:
+        if _ocr is None:
+            from paddleocr import PaddleOCR
+
+            _ocr = PaddleOCR(
+                text_detection_model_name="PP-OCRv5_server_det",
+                text_recognition_model_name="PP-OCRv5_server_rec",
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                use_textline_orientation=True,
+            )
+    return _ocr
+
+
+def ocr_text(payload: bytes, lock=None) -> str:
+    """Every line PP-OCRv5 finds in the page, without layout."""
+    pipeline = load_ocr()
+    suffix = ".jpg" if payload.startswith(b"\xff\xd8") else ".png"
+    with tempfile.TemporaryDirectory() as scratch:
+        page = Path(scratch) / f"page{suffix}"
+        page.write_bytes(payload)
+        with (lock or nullcontext()):
+            result = pipeline.predict(
+                str(page), text_det_limit_side_len=MAX_TEXT_SIDE, text_det_limit_type="max"
+            )[0]
+    try:
+        texts = result["rec_texts"]
+    except Exception:
+        texts = getattr(result, "rec_texts", [])
+    return "\n".join(str(text) for text in texts)
+
+
+def read_page(pipeline, payload: bytes, lock=None, invert=None, ocr=None) -> str:
+    """Run one page and return its markdown; the scratch file is gone before the caller sees it."""
+    source, text = payload, _predict(pipeline, payload, lock)
+    if visible_characters(text) < MIN_TEXT:
+        inverted = (invert or invert_dark_page)(payload)
+        if inverted:
+            alternate = _predict(pipeline, inverted, lock)
+            if visible_characters(alternate) > visible_characters(text):
+                source, text = inverted, alternate
+    if visible_characters(text) < MIN_TEXT:
+        alternate = ocr(source) if ocr is not None else ocr_text(source, lock)
+        if visible_characters(alternate) > visible_characters(text):
+            text = alternate
+    return text
 
 
 def load_pipeline():
