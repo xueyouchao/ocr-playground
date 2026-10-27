@@ -69,9 +69,9 @@ MINERU_SPEC = EngineSpec(
 PADDLE_SPEC = EngineSpec(
     id="paddleocr-gpu",
     name="PP-StructureV3 (GPU)",
-    kind="staged",
+    kind="native",
     pipeline="PaddleOCR's server models on a Modal L4 — layout, OCR, tables, formulas, reading order",
-    device="remote · GPU L4 (Modal)",
+    device="GPU (Modal L4)",
     needs="PADDLE_OCR_BASE_URL",
 )
 
