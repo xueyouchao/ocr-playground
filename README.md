@@ -256,8 +256,10 @@ requirements-cocoindex.txt  the indexer's extra dependency, pinned
 
 ## Further reading
 
-[`WRITEUP.md`](WRITEUP.md) is the longer story: what the artifacts are, how the build is wired, what
-the runs showed, and the trade-offs behind the decisions. This README stays the setup guide.
+[`WRITEUP.md`](WRITEUP.md) is the post draft behind the demo: what it is, the two upload paths, and
+what the cold-start caching saved. The code's own design — the ports, the container, the two ways in —
+is in [`docs/architecture.md`](docs/architecture.md). The longer engineering write-up that the post
+replaced is in git history (`git show 0a304e2:WRITEUP.md`). This README stays the setup guide.
 
 ## Credits
 

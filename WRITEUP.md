@@ -21,7 +21,7 @@ Cold start dropped to roughly 2-3 minutes, mostly container start cost, plus a 2
 What I observed (a qualitative comparison on this one document, not a formal benchmark)
 
 On PDFs with images, handwriting or complex layouts, GPU-based OCR is clearly better than the CPU path.
-Top tier: Chandra OCR 2 and Nemotron 3.5 Parse. Both make small mistakes on pages 5 and 6, but overall quality is excellent. Chandra OCR 2 produced the cleanest table layout. Nemotron 3.5 Parse kept very good quality and was noticeably faster than the others, so the trade-off is layout clarity vs. speed.
+Top tier: Chandra OCR 2 and Nemotron 3.5 Parse. Both still make mistakes on pages 5 and 6. Chandra OCR 2 produced the cleanest table layout, but clean layout is not the same as a complete reading: on page 5 it draws the grid and leaves nearly every cell empty — 21,033 characters, of which about 262 are text. Nemotron 3.5 Parse kept very good quality and was noticeably faster than the others, so the trade-off is layout clarity vs. speed.
 Second tier: GLM-OCR and MinerU 2.5.
 
 What I’m exploring next

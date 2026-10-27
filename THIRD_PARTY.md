@@ -11,11 +11,12 @@ in this repository, and each parser keeps its own terms.
 | Upstream | <https://github.com/nvidia/Nemotron-3.5-Parse> |
 | Revision | `0fad7099302dc11313b7e3157eb8fd6ae633176e` |
 | Licence | OpenMDW-1.1 — full text in [`LICENSES/OpenMDW-1.1.txt`](LICENSES/OpenMDW-1.1.txt) |
-| File list | `modal/nemotron_helper/nemotron_parse/SOURCE_MANIFEST.json` — one entry per file, with its upstream path and sha256 |
+| File list | `modal/nemotron_helper/nemotron_parse/SOURCE_MANIFEST.json` — upstream path and sha256 for the 18 files extracted under `nemotron_parse/engine/`; the wrapper modules beside them (`inference.py`, `batch.py`, `tables.py`, `postprocessing.py` and the two compatibility shims) are tagged the same way but are **not** in that list |
 
 The `SPDX-FileCopyrightText` / `SPDX-License-Identifier` headers in those files are upstream's and
-are left untouched. OpenMDW-1.1 asks anyone redistributing the material to keep both a copy of the
-agreement and the copyright and origin notices — that is what `LICENSES/` and the headers do.
+are left untouched. Where a file is not in the manifest, its header is the provenance. OpenMDW-1.1
+asks anyone redistributing the material to keep both a copy of the agreement and the copyright and
+origin notices — that is what `LICENSES/` and the headers do.
 
 Local adaptations are recorded in the same manifest's `adaptations` list rather than as edits to the
 headers.
