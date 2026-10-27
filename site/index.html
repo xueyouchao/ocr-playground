@@ -1160,8 +1160,17 @@ function warmGpu() {
   }
 }
 
+// Reaching for the uploader is intent, so it warms at once; a tick in the picker is not — the visitor
+// may be about to untick it, and a warm cannot be called back (it rents a GPU from boot to scale-down).
 $("uploader").addEventListener("pointerenter", warmGpu);
 $("uploader").addEventListener("focusin", warmGpu);
+
+const WARM_SETTLE_MS = 800;
+let warmTimer = null;
+function warmSoon() {
+  clearTimeout(warmTimer);
+  warmTimer = setTimeout(warmGpu, WARM_SETTLE_MS);
+}
 
 const MAX_MODES = 3;
 
@@ -1183,7 +1192,7 @@ $("mode-checks").addEventListener("change", (event) => {
   state.modes = chosen;
   userChoseMode = true;
   applyModes();
-  warmGpu();
+  warmSoon();
   uploadStatus(modeNote(state.modes));
 });
 

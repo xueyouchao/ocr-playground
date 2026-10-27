@@ -387,6 +387,18 @@ def test_the_intent_ping_starts_the_gpu(api):
     assert len(jobs) == 1
 
 
+def test_a_warm_names_the_engine_it_started(api, capfd):
+    """A warm rents GPU time from boot to scale-down, so the log has to say which engine it was for:
+    "why did mineru start when I had unticked it" should not need the dashboard to answer."""
+    engine = FakeWarmEngine(GLM)
+    base, container = api(glm_base_url="http://127.0.0.1:9/v1")
+    container.warmer.override(warmer_for(engine, []))
+
+    call(base, "/api/warm", method="POST", headers={"X-Mode": "glm"})
+
+    assert "warm glm: started" in capfd.readouterr().err
+
+
 def test_a_second_ping_inside_the_interval_costs_nothing(api):
     base, container = api(glm_base_url="http://127.0.0.1:9/v1")
     container.warmer.override(warmer_for(FakeWarmEngine(GLM), [], min_interval_seconds=300))

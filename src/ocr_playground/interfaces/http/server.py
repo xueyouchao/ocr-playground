@@ -215,7 +215,11 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as error:  # noqa: BLE001 - an unknown mode or an unset endpoint
             self._failure(error)
             return
-        self._json(HTTPStatus.OK, {"warm": self.container.warmer().request(mode).value})
+        status = self.container.warmer().request(mode)
+        # A warm rents GPU time from boot until it scales down, so which engine was warmed — and why —
+        # has to be readable in the service log rather than inferred from the dashboard.
+        sys.stderr.write(f"warm {mode}: {status.value}\n")
+        self._json(HTTPStatus.OK, {"warm": status.value})
 
     def do_POST(self) -> None:  # noqa: N802
         self._body_read = False
