@@ -226,7 +226,9 @@ class VlmEngine:
                     # A relative Location is legal in HTTP; Modal sends an absolute one.
                     url = urllib.parse.urljoin(url, location)
                     ready = False  # nothing is serving this yet, so stop sending the page
-                    time.sleep(min(_HOP_PAUSE, max(0.0, remaining - 1)))
+                    left = budget - time.monotonic() - 1  # the hop may have used what was left
+                    if left > 0:
+                        time.sleep(min(_HOP_PAUSE, left))
                     continue
                 if not ready:
                     # A 400 to the kilobyte is still a container reading it, so one is serving now.
