@@ -46,7 +46,7 @@ A test replaces exactly those five things; nothing else knows the difference.
   module. That is what makes the HTTP tests run the real handler against a fake reading.
 
 The trade is honest: the service now depends on a compiled package (`dependency-injector==4.49.1`)
-where it used to be stdlib-only. The static build does not: `collect.py`, `build.py` and `prepare.py`
+where it used to be stdlib-only. The static build does not: `scripts/collect.py`, `scripts/build.py` and `scripts/prepare.py`
 reach `domain` and `interfaces/site` and never touch the container, so `make site` still runs on a
 bare Python. If the dependency becomes unwelcome, the container is one file and every constructor is
 already explicit — deleting it means writing that file by hand, not untangling imports.

@@ -1,6 +1,6 @@
 # Deploying
 
-The site is static: `index.html` plus `assets/pages/*.jpg`. Nothing else is needed at runtime.
+The site is static: `index.html` plus `pages/*.jpg`. Nothing else is needed at runtime.
 
 ## This box (srv1567269.hstgr.cloud)
 
@@ -8,7 +8,7 @@ Traefik owns :80/:443 and terminates TLS with Let's Encrypt (HTTP-01). Sites are
 containers carrying routing labels; Traefik watches Docker and issues the certificate on first request.
 
 ```bash
-make publish          # rsync index.html + assets/ into /home/ubuntu/sites/ocr-playground
+make publish          # rsync site/index.html + site/pages/ into /home/ubuntu/sites/ocr-playground
 ```
 
 The container behind https://ocr-playground.srv1567269.hstgr.cloud was created once:
@@ -64,7 +64,8 @@ directory. Add rate limiting before pointing it at anything that matters.
 ## Anywhere else
 
 ```bash
-rsync -av --delete index.html assets user@host:/var/www/ocr-playground/
+rsync -av site/index.html user@host:/var/www/ocr-playground/
+rsync -av --delete site/pages/ user@host:/var/www/ocr-playground/pages/
 ```
 
 `deploy/nginx.conf` is a standalone server block for a plain nginx host, including the cache headers

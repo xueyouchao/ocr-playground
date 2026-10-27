@@ -13,6 +13,7 @@ from pathlib import Path
 
 from ...domain.engine import EngineRegistry
 from ...domain.ports import PageOcr
+from ..site.layout import data
 
 SUFFIX_TYPES = {
     ".pdf": "application/pdf",
@@ -43,7 +44,9 @@ class IndexerConfig:
         chandra_configured = bool(values.get("CHANDRA_OCR_BASE_URL", "").strip())
         glm_configured = bool(values.get("GLM_OCR_BASE_URL", "").strip())
         return cls(
-            corpus=Path(values.get("OCR_CORPUS", "corpus")).resolve(),
+            # Relative to the checkout, like the rest of the layout: the bundled scan moved to
+            # data/corpus/, and an unset OCR_CORPUS should still point at it.
+            corpus=Path(values.get("OCR_CORPUS", str(data(Path.cwd()) / "corpus"))).resolve(),
             out=Path(values.get("OCR_OUT", "out")),
             db=Path(values.get("OCR_DB", "cocoindex.db")),
             # The uploader defaults to Chandra; the indexer follows the same preference among

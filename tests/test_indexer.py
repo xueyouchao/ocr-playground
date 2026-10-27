@@ -111,3 +111,13 @@ def test_payload_is_stable_json() -> None:
     assert payload({"b": 1, "a": 2}) == '{\n  "a": 2,\n  "b": 1\n}\n', (
         "sorted keys keep re-runs byte-identical"
     )
+
+
+def test_an_unset_corpus_points_at_the_bundled_scan(tmp_path, monkeypatch) -> None:
+    """`make index` with nothing in the environment must find data/corpus, not a root-level corpus/."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data" / "corpus").mkdir(parents=True)
+
+    config = IndexerConfig.from_env({})
+
+    assert config.corpus == (tmp_path / "data" / "corpus").resolve()

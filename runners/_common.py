@@ -1,15 +1,22 @@
 """Shared bits: where pages and records live, and one shape for every runner."""
 import json
+import sys
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from ocr_playground.interfaces.site.layout import data  # noqa: E402
+
 PAGES = Path("/tmp/ocr-playground/pages")
-RECORDS = Path(__file__).resolve().parents[1] / "records"
+RECORDS = data(ROOT) / "records"
 
 
 def page_paths() -> list[Path]:
     pages = sorted(PAGES.glob("page-*.png"), key=lambda path: int(path.stem.split("-")[1]))
     if not pages:
-        raise SystemExit(f"no pages in {PAGES} — run prepare.py first")
+        raise SystemExit(f"no pages in {PAGES} — run 'make pages' first")
     return pages
 
 

@@ -796,7 +796,7 @@ function pageOf(number) {
 function renderRail() {
   const doc = currentDoc();
   const page = pageOf(state.page);
-  const source = page.preview || `assets/pages/page-${state.page}.jpg`;
+  const source = page.preview || `pages/page-${state.page}.jpg`;
   $("rail-image").src = source;
   $("rail-image").alt = `page ${state.page} as it was read`;
   $("rail-open").href = source;
@@ -972,7 +972,7 @@ function renderFooter() {
       + `read live by ${names}${where} · nothing is stored.`;
   } else {
     $("footer").textContent = `${doc.systems.length} parsers on ${doc.pages.length} pages · recorded from each project's own CLI/API on a 4-core CPU box `
-      + `(200 dpi page renders) and Modal L4 GPUs · runs are in records/, provenance in systems.json.`;
+      + `(200 dpi page renders) and Modal L4 GPUs · runs are in data/records/, provenance in data/systems.json.`;
   }
   // The harness is MIT except the vendored Nemotron helper; one clause keeps the page honest about it.
   $("footer").textContent += " Code: MIT licence.";

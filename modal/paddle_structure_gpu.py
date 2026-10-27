@@ -53,10 +53,16 @@ def parse(pages: dict) -> dict:
 @app.local_entrypoint()
 def main(paths: str = ""):
     import json
+    import sys
     from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from ocr_playground.interfaces.site.layout import data
 
     files = {Path(item).stem: Path(item).read_bytes() for item in paths.split(",") if item}
     results = parse.remote(files)
-    target = Path(__file__).resolve().parents[1] / "records" / "paddleocr-gpu.json"
+    target = data(root) / "records" / "paddleocr-gpu.json"
     target.write_text(json.dumps(results, indent=1, ensure_ascii=False), encoding="utf-8")
     print(f"{target}: {sum(len(v) for v in results.values()):,} chars over {len(results)} pages")

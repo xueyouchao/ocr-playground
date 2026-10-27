@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 from ...domain.reading import ReadingStats
+from .layout import data, site
 
 
 def measure(text: str | None) -> dict:
@@ -25,9 +26,9 @@ def measure(text: str | None) -> dict:
 
 
 def main(root: Path) -> None:
-    systems = json.loads((root / "systems.json").read_text(encoding="utf-8"))
+    systems = json.loads((data(root) / "systems.json").read_text(encoding="utf-8"))
     recorded = {}
-    for path in sorted((root / "records").glob("*.json")):
+    for path in sorted((data(root) / "records").glob("*.json")):
         recorded[path.stem] = json.loads(path.read_text(encoding="utf-8"))
 
     page_count = max((len(pages) for pages in recorded.values()), default=0)
@@ -50,7 +51,7 @@ def main(root: Path) -> None:
                     for s in systems],
         "pages": pages,
     }
-    (root / "evidence.json").write_text(
+    (site(root) / "evidence.json").write_text(
         json.dumps(evidence, indent=1, ensure_ascii=False), encoding="utf-8"
     )
     for system in systems:
