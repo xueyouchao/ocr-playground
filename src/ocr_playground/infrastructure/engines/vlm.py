@@ -12,8 +12,10 @@ prompt below is therefore mostly an identity marker rather than an instruction (
 exception — it is a VLM with a real instruction, and the deployment's prompt is a setting).
 
 Modal answers a cold endpoint with a `303` to the same URL carrying an attempt token, and following
-that `Location` *is* the cold-start wait. urllib refuses to replay a POST on a 307/308, so the
-redirect is followed by hand; the budget is what stops that loop from being unbounded.
+that `Location` *is* the cold-start wait. The redirect is therefore followed by hand, re-sending the
+page: urllib would replay a `303` *as a GET, without the body*, which the wrappers — POST-only routes
+— can only answer with a 405, after paying for the whole boot. The budget is what bounds that loop;
+a handoff counter only stops a redirect *loop* from spinning.
 """
 from __future__ import annotations
 
@@ -27,6 +29,12 @@ import urllib.request
 from ...application.errors import EngineFailure, EngineTimeout
 from ...domain.document import PageImage
 from ...domain.engine import EngineSpec
+
+# The statuses Modal uses to hand a cold request to the attempt URL that waits for the container.
+_HANDOFFS = (303, 307, 308)
+# Not the bound on a cold start — the deadline is. This only stops an endpoint that answers 303 in a
+# tight loop from spinning until the budget runs out.
+MAX_HANDOFFS = 64
 
 GLM_SPEC = EngineSpec(
     id="glm-ocr",
@@ -85,6 +93,18 @@ UNLIMITED_SPEC = EngineSpec(
     device="remote · GPU L4 (Modal)",
     needs="UNLIMITED_OCR_BASE_URL",
 )
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Hand a redirect back to `read` instead of replaying the request behind its back.
+
+    urllib answers a `303` by re-sending the request as a GET with no body, so a cold endpoint's
+    handoff would arrive at the attempt URL as a bodyless GET on a POST-only route. Returning `None`
+    leaves the error to the caller, which replays the POST itself, body and all.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 class VlmEngine:
@@ -159,9 +179,10 @@ class VlmEngine:
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self._api_key}"}
         url = self._base_url + "/chat/completions"
         budget = time.monotonic() + self._request_timeout * 4 if deadline is None else deadline
+        opener = urllib.request.build_opener(_NoRedirect())
 
-        body = None
-        for _redirect in range(4):
+        handoffs = 0
+        while True:
             remaining = budget - time.monotonic()
             if remaining <= 1:
                 raise EngineTimeout(
@@ -170,17 +191,24 @@ class VlmEngine:
                 )
             request = urllib.request.Request(url, data=data, headers=headers)
             try:
-                with urllib.request.urlopen(
-                    request, timeout=min(self._request_timeout, remaining)
-                ) as response:
+                with opener.open(request, timeout=min(self._request_timeout, remaining)) as response:
                     body = json.loads(response.read().decode())
                 break
             except urllib.error.HTTPError as error:
-                if error.code in (303, 307, 308) and error.headers.get("Location"):
+                # A cold start hands off however many times the container needs; only the budget,
+                # checked above, decides when that has gone on too long.
+                location = error.headers.get("Location") if error.code in _HANDOFFS else None
+                detail = "" if location else error.read().decode(errors="replace")[:300]
+                error.close()
+                if location:
+                    handoffs += 1
+                    if handoffs >= MAX_HANDOFFS:
+                        raise EngineFailure(
+                            f"the {self.spec.name} endpoint kept redirecting"
+                        ) from error
                     # A relative Location is legal in HTTP; Modal sends an absolute one.
-                    url = urllib.parse.urljoin(url, error.headers["Location"])
+                    url = urllib.parse.urljoin(url, location)
                     continue
-                detail = error.read().decode(errors="replace")[:300]
                 raise EngineFailure(
                     f"the {self.spec.name} endpoint answered {error.code}: {detail or 'no detail'}"
                 ) from error
@@ -189,8 +217,6 @@ class VlmEngine:
                     f"the {self.spec.name} endpoint did not answer: {error}"
                 ) from error
 
-        if body is None:
-            raise EngineFailure(f"the {self.spec.name} endpoint kept redirecting")
         try:
             content = body["choices"][0]["message"].get("content") or ""
         except (KeyError, IndexError, TypeError) as error:
