@@ -5,8 +5,8 @@
 #
 # Where things live: `data/` is what a run produced (the scan, the roster, the records), `site/` is
 # what the build publishes (template, page images, and the two files it generates), `scripts/` holds
-# the entry points, `src/` the package itself. `src/ocr_playground/interfaces/site/layout.py` is the
-# single place that names the two directories.
+# the entry points (and `scripts/runners/`), `src/` the package itself, `deploy/` the two ways it ships.
+# `src/ocr_playground/interfaces/site/layout.py` is the single place that names the two data directories.
 PY        ?= python3
 VENV      ?= .venv
 VENV_PY   ?= $(VENV)/bin/python
@@ -44,7 +44,7 @@ pages:
 # data/records/ is already populated. Re-running a parser is a per-parser command with its own
 # environment (see README), so this target explains itself rather than exiting 0 having done nothing.
 records:
-	@echo "data/records/ is populated; re-run one parser from runners/ or modal/ (README 'Run it'), then 'make site'"
+	@echo "data/records/ is populated; re-run one parser from scripts/runners/ or deploy/modal/ (README 'Run it'), then 'make site'"
 
 site:
 	$(PY) scripts/collect.py
@@ -55,7 +55,7 @@ serve:
 
 api:
 	@test -x $(VENV_PY) || { echo "run 'make venv' first"; exit 1; }
-	$(VENV_PY) api/server.py --port 8090
+	$(VENV_PY) scripts/api.py --port 8090
 
 index:
 	$(COCOINDEX) update scripts/index.py

@@ -20,7 +20,7 @@ box can afford, not the pipeline's own. On this app's A10G (24 GB, the class the
 an L4) the configured defaults — `PP-DocLayout-L`, `PP-OCRv5_server_det`, `PP-OCRv5_server_rec` — are
 what PP-StructureV3 is meant to run.
 
-    modal deploy modal/serve_paddle.py
+    modal deploy deploy/modal/serve_paddle.py
     PADDLE_OCR_BASE_URL=https://…/v1 make api
 """
 import base64

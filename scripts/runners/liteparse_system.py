@@ -1,7 +1,7 @@
 """LiteParse: the text layer laid out (no OCR), and optionally an OCR server plugged in.
 
-    LIT_CLI=/path/to/lit python runners/liteparse_system.py  # text layer, lines joined
-    python runners/liteparse.py --ocr-server-url http://…/ocr  # their "bring your own OCR"
+    LIT_CLI=/path/to/lit python scripts/runners/liteparse_system.py  # text layer, lines joined
+    python scripts/runners/liteparse.py --ocr-server-url http://…/ocr  # their "bring your own OCR"
 
 The second form needs a server speaking LiteParse's OCR API. PaddleOCR's own wrapper lives at
 https://github.com/run-llama/liteparse/tree/main/ocr/paddleocr — run that, then point here.

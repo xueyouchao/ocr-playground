@@ -4,7 +4,7 @@ Its own card defines the task prompt; the model ignores a chat-style instruction
 supplies the control-token prompt rather than passing a visitor's text through.
 
     modal deploy serve_nemotron.py
-    runners/vlm_endpoint.py --id nemotron-parse --model nemotron --base-url https://…/v1
+    scripts/runners/vlm_endpoint.py --id nemotron-parse --model nemotron --base-url https://…/v1
 """
 from pathlib import Path
 

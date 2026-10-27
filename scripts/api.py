@@ -1,7 +1,7 @@
 """Compatibility entry point for `make api` and the container's CMD.
 
 The service lives in `ocr_playground.interfaces.http`; this file only puts `src/` on
-`sys.path` (running `python api/server.py` puts `api/` there instead) and delegates.
+`sys.path` (running `python scripts/api.py` puts `scripts/` there instead) and delegates.
 """
 from __future__ import annotations
 

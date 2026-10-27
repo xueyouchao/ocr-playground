@@ -122,7 +122,7 @@ def test_the_static_measure_is_the_domain_measure() -> None:
     assert site_collect.measure(None) == {"chars": None, "tokens": None, "numeric_share": None}
 
 
-@pytest.mark.parametrize("shim", ["scripts/collect.py", "scripts/build.py", "scripts/prepare.py", "api/server.py"])
+@pytest.mark.parametrize("shim", ["scripts/collect.py", "scripts/build.py", "scripts/prepare.py", "scripts/api.py"])
 def test_every_entry_shim_imports_cleanly(shim) -> None:
     # `run_name="not_main"` imports the shim without running its main(); this is what proves the
     # sys.path juggling still finds the package when the script is run from its own directory.
@@ -133,7 +133,7 @@ def test_every_entry_shim_imports_cleanly(shim) -> None:
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("shim", ["scripts/prepare.py", "api/server.py"])
+@pytest.mark.parametrize("shim", ["scripts/prepare.py", "scripts/api.py"])
 def test_the_cli_shims_answer_help(shim) -> None:
     result = subprocess.run([sys.executable, shim, "--help"], cwd=ROOT,
                             capture_output=True, text=True)
@@ -234,6 +234,6 @@ def test_a_refused_storage_write_cannot_freeze_the_toggle() -> None:
 def test_every_record_writer_agrees_with_the_build() -> None:
     """One module names the layout: a runner writing elsewhere would publish stale runs silently."""
     from ocr_playground.interfaces.site.layout import data
-    from runners._common import RECORDS
+    from scripts.runners._common import RECORDS
 
     assert RECORDS == data(ROOT) / "records"

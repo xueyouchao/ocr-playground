@@ -1,7 +1,7 @@
 """Serve one OCR VLM on Modal as an OpenAI-compatible endpoint. Prototype, scale-to-zero.
 
-    modal deploy modal/serve_glm_ocr.py
-    # then: runners/vlm_endpoint.py --id glm-ocr --model glm-ocr --base-url https://…modal.run/v1
+    modal deploy deploy/modal/serve_glm_ocr.py
+    # then: scripts/runners/vlm_endpoint.py --id glm-ocr --model glm-ocr --base-url https://…modal.run/v1
     modal app stop ocr-playground-glm-ocr      # when the row is recorded
 
 The vLLM image is the upstream one: building vLLM from wheels on Modal costs ten minutes per cold

@@ -10,7 +10,7 @@ backend silently skipped pages in a whole-document run. A single-page job cannot
 The VLM backend can also return an empty page; it did so for two pages of this corpus. That page is
 retried once and then read by the pipeline backend, which is slower but does not come back empty.
 
-    modal deploy modal/serve_mineru.py
+    modal deploy deploy/modal/serve_mineru.py
     MINERU_BASE_URL=https://…/v1 make api
 """
 import modal

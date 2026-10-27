@@ -55,7 +55,7 @@ def _load_wrapper():
     sys.modules["modal"] = modal
     try:
         spec = importlib.util.spec_from_file_location(
-            "serve_paddle_under_test", ROOT / "modal" / "serve_paddle.py"
+            "serve_paddle_under_test", ROOT / "deploy" / "modal" / "serve_paddle.py"
         )
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)

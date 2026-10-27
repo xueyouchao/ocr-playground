@@ -3,7 +3,7 @@ import json
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 # The importable tree lives under src/; the repository root holds data, site and scripts.
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
