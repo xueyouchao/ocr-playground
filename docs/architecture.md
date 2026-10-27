@@ -4,7 +4,7 @@ The reading is the product. Everything else — HTTP, CocoIndex, poppler, the st
 in or a way out, and the structure says so.
 
 ```
-ocr_playground/
+src/ocr_playground/
   domain/            what a document, a page reading and an engine are; what a bad request means
   application/       use cases: read this document, hold a parse slot
   infrastructure/    adapters: poppler, ImageMagick, LiteParse, the OpenAI-compatible GPU

@@ -254,14 +254,14 @@ scripts/
   collect.py             records + roster -> site/evidence.json
   build.py               evidence + template -> site/index.html
   index.py               CocoIndex entry point -> interfaces/indexer
-runners/                 one file per CPU parser; _common.py defines the record shape
-modal/                   one app per GPU parser, all scale-to-zero
-ocr_playground/
+src/ocr_playground/      the importable tree; entry points put src/ on the path, nothing above it
   domain/                documents, readings, engines, ports, domain errors
   application/           the read-document use case and the two-slot gate
   infrastructure/        poppler, ImageMagick, LiteParse, GLM-OCR, settings, fingerprint
   interfaces/            http/, indexer/, site/ (+ layout.py, which names data/ and site/)
   composition/           the dependency-injector container
+runners/                 one file per CPU parser; _common.py defines the record shape
+modal/                   one app per GPU parser, all scale-to-zero
 api/server.py            compatibility entry point -> interfaces/http
 docs/architecture.md     the design note behind the structure
 tests/                   the offline suite; tests/fakes.py holds the doubles

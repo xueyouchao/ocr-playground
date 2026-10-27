@@ -57,8 +57,8 @@ def main(paths: str = ""):
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
+    if str(root / "src") not in sys.path:
+        sys.path.insert(0, str(root / "src"))
     from ocr_playground.interfaces.site.layout import data
 
     files = {Path(item).stem: Path(item).read_bytes() for item in paths.split(",") if item}
