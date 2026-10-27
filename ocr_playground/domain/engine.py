@@ -21,6 +21,10 @@ class EngineSpec:
 
     id: str
     name: str
+    # How the page is read, not where: `vlm` is one vision-language model in a single pass, `staged`
+    # is separate layout/OCR/table models in sequence, `hybrid` is a VLM with a staged fallback.
+    # Where it runs lives in `device` ("native · CPU ×4" / "remote · GPU L4"), and the fallback that
+    # offers a runnable mode ranks by that.
     kind: str
     pipeline: str
     device: str

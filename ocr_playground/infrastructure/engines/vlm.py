@@ -32,7 +32,7 @@ GLM_SPEC = EngineSpec(
     name="GLM-OCR",
     kind="vlm",
     pipeline="0.9B VLM on a Modal L4 (vLLM) — cold starts take about 3 minutes",
-    device="GPU (Modal L4)",
+    device="remote · GPU L4 (Modal)",
     needs="GLM_OCR_BASE_URL",
 )
 
@@ -41,7 +41,7 @@ CHANDRA_SPEC = EngineSpec(
     name="Chandra OCR 2",
     kind="vlm",
     pipeline="Chandra 2 on a Modal L4 — layout-preserving markdown, its own ocr_layout task",
-    device="GPU (Modal L4)",
+    device="remote · GPU L4 (Modal)",
     needs="CHANDRA_OCR_BASE_URL",
 )
 
@@ -50,16 +50,16 @@ NEMOTRON_SPEC = EngineSpec(
     name="Nemotron 3.5 Parse",
     kind="vlm",
     pipeline="NVIDIA Nemotron 3.5 Parse on a Modal L4 — markdown with HTML tables",
-    device="GPU (Modal L4)",
+    device="remote · GPU L4 (Modal)",
     needs="NEMOTRON_PARSE_BASE_URL",
 )
 
 MINERU_SPEC = EngineSpec(
     id="mineru-gpu",
     name="MinerU 2.5 (VLM)",
-    kind="vlm",
+    kind="hybrid",
     pipeline="MinerU2.5-1.2B with its layout and table models on a Modal L4 — page-by-page markdown",
-    device="GPU (Modal L4)",
+    device="remote · GPU L4 (Modal)",
     needs="MINERU_BASE_URL",
 )
 
@@ -68,7 +68,7 @@ UNLIMITED_SPEC = EngineSpec(
     name="Unlimited-OCR",
     kind="vlm",
     pipeline="Baidu Unlimited-OCR on a Modal L4 — long pages, crop-and-stitch",
-    device="GPU (Modal L4)",
+    device="remote · GPU L4 (Modal)",
     needs="UNLIMITED_OCR_BASE_URL",
 )
 
