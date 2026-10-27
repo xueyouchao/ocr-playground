@@ -41,6 +41,10 @@ MODEL = "zai-org/GLM-OCR"
     # somebody looks like they are about to upload. 120 s keeps a second upload warm without paying
     # for five idle minutes after every one.
     scaledown_window=120,
+    # One request per engine per upload, and a client that gives up asks again: without a cap the
+    # retry buys a second copy of a model that is already loading. Extra requests queue inside the
+    # one container instead of renting another GPU.
+    max_containers=1,
     startup_timeout=1800,
 )
 @modal.web_server(port=8000, startup_timeout=1800)

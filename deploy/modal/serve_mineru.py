@@ -76,6 +76,10 @@ def read_image(path, backend: str) -> str:
     gpu="L4",
     timeout=1800,
     scaledown_window=120,
+    # One request per engine per upload, and a client that gives up asks again: without a cap the
+    # retry buys a second copy of a model that is already loading. Extra requests queue inside the
+    # one container instead of renting another GPU.
+    max_containers=1,
     startup_timeout=2400,
     volumes={"/models": model_cache},
 )
