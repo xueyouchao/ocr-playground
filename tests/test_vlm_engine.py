@@ -15,6 +15,7 @@ import pytest
 from ocr_playground.application.errors import EngineFailure, EngineTimeout
 from ocr_playground.domain.document import PageImage
 from ocr_playground.infrastructure.engines import GLM_SPEC, VlmEngine, vlm
+from ocr_playground.infrastructure.engines.vlm import MAX_UPLOADS
 
 
 class Stub:
@@ -234,6 +235,27 @@ def test_a_page_dropped_on_the_wire_is_retried_with_a_kilobyte(endpoint, tmp_pat
     assert stub.dropped == ["/chat/completions"], "the page was dropped exactly once"
     assert not stub.requests[0]["body"].get("messages"), "the retry asks with a kilobyte"
     assert stub.requests[1]["body"]["messages"][0]["content"][0]["image_url"], "then the page"
+
+
+def test_a_flapping_endpoint_is_not_handed_the_page_forever(endpoint, tmp_path) -> None:
+    """Every upload of the page is real GPU work, so a wire that keeps dropping it stops being offered.
+
+    The probes keep succeeding — a container is there, it is the upload that dies — so without the cap
+    the loop would happily re-send the page until the budget ran out.
+    """
+    def script(path, body):
+        return 400, {}, {"error": "messages is required"}
+
+    stub, engine = endpoint(script)
+    stub.drop_over = 1024  # every page upload dies before it is read; the probes survive
+    stub.drop_budget = 10_000
+
+    with pytest.raises(EngineFailure, match="kept dropping the page"):
+        engine.read(page(tmp_path, b"png" + b"\0" * 4096), time.monotonic() + 30)
+
+    assert len(stub.dropped) == MAX_UPLOADS, "the page is offered exactly MAX_UPLOADS times"
+    assert len(stub.requests) == MAX_UPLOADS, "one kilobyte probe per attempt, then it stops"
+    assert all(not request["body"].get("messages") for request in stub.requests)
 
 
 def test_an_http_error_is_a_bad_gateway(endpoint, tmp_path) -> None:

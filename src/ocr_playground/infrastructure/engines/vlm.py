@@ -246,7 +246,12 @@ class VlmEngine:
                 # Back off: a boot is minutes long, so hammering it only wastes connections, while
                 # an endpoint that is genuinely gone should not be dialled 400 times.
                 pause = min(_RETRY_PAUSE * 2 ** min(failures - 1, 4), 30.0)
-                time.sleep(max(0.0, min(pause, remaining - 1)))
+                # The clock is read again here: the request that just failed may have eaten the rest
+                # of the budget, and a timeout the caller is waiting on must not be delayed by a sleep
+                # that was sized before the request ran.
+                left = budget - time.monotonic() - 1
+                if left > 0:
+                    time.sleep(min(pause, left))
                 continue
 
             if not ready:
