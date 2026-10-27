@@ -100,7 +100,7 @@ def invert_dark_page(payload: bytes) -> bytes | None:
             buffer = BytesIO()
             ImageOps.invert(rgb).save(buffer, format="PNG")
             return buffer.getvalue()
-    except Exception:
+    except Exception:  # noqa: BLE001 - a page Pillow cannot decode is simply not inverted
         return None
 
 
@@ -135,9 +135,8 @@ def load_ocr():
     return _ocr
 
 
-def ocr_text(payload: bytes, lock=None) -> str:
+def ocr_lines(pipeline, payload: bytes, lock=None) -> str:
     """Every line PP-OCRv5 finds in the page, without layout."""
-    pipeline = load_ocr()
     suffix = ".jpg" if payload.startswith(b"\xff\xd8") else ".png"
     with tempfile.TemporaryDirectory() as scratch:
         page = Path(scratch) / f"page{suffix}"
@@ -148,9 +147,14 @@ def ocr_text(payload: bytes, lock=None) -> str:
             )[0]
     try:
         texts = result["rec_texts"]
-    except Exception:
+    except (KeyError, TypeError):
         texts = getattr(result, "rec_texts", [])
     return "\n".join(str(text) for text in texts)
+
+
+def ocr_text(payload: bytes, lock=None) -> str:
+    """The lazily built PP-OCRv5 pipeline, reading the page without layout."""
+    return ocr_lines(load_ocr(), payload, lock)
 
 
 def read_page(pipeline, payload: bytes, lock=None, invert=None, ocr=None) -> str:

@@ -11,7 +11,10 @@ import importlib.util
 import sys
 import threading
 import types
+from io import BytesIO
 from pathlib import Path
+
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -150,6 +153,87 @@ class _Sequence:
         self.payloads.append(Path(path).read_bytes())
         self.calls.append(options)
         return [_Result(self.readings[len(self.payloads) - 1])]
+
+
+def _image_bytes(color: tuple[int, int, int] = (10, 20, 30), image_format: str = "PNG") -> bytes:
+    buffer = BytesIO()
+    Image.new("RGB", (8, 8), color).save(buffer, format=image_format)
+    return buffer.getvalue()
+
+
+def test_a_dark_page_becomes_an_inverted_png() -> None:
+    inverted_bytes = wrapper.invert_dark_page(_image_bytes((10, 20, 30)))
+
+    assert inverted_bytes is not None
+    with Image.open(BytesIO(inverted_bytes)) as inverted:
+        assert inverted.format == "PNG"
+        assert inverted.size == (8, 8)
+        assert inverted.convert("RGB").getpixel((0, 0)) == (245, 235, 225)
+
+
+def test_a_dark_jpeg_also_comes_back_as_a_png() -> None:
+    inverted_bytes = wrapper.invert_dark_page(_image_bytes((0, 0, 0), "JPEG"))
+
+    assert inverted_bytes is not None
+    with Image.open(BytesIO(inverted_bytes)) as inverted:
+        assert inverted.format == "PNG"
+
+
+def test_a_light_page_is_not_inverted() -> None:
+    assert wrapper.invert_dark_page(_image_bytes((255, 255, 255))) is None
+
+
+def test_the_brightness_boundary_is_exact() -> None:
+    edge = wrapper.DARK_MEAN
+    assert wrapper.invert_dark_page(_image_bytes((edge - 1,) * 3)) is not None
+    assert wrapper.invert_dark_page(_image_bytes((edge,) * 3)) is None
+
+
+def test_bytes_that_do_not_decode_are_left_alone() -> None:
+    assert wrapper.invert_dark_page(PNG) is None, "the fake PNG fixture is not a decodable image"
+    assert wrapper.invert_dark_page(b"not an image") is None
+
+
+class _OcrPipeline:
+    def __init__(self, result):
+        self.result = result
+        self.path: Path | None = None
+        self.options: dict = {}
+
+    def predict(self, path, **options):
+        self.path = Path(path)
+        self.options = options
+        return [self.result]
+
+
+class _OcrPage:
+    def __init__(self, texts):
+        self.rec_texts = texts
+
+
+def test_ocr_lines_joins_rec_texts_at_the_larger_detection_limit() -> None:
+    pipeline = _OcrPipeline({"rec_texts": ["first line", "second line"]})
+
+    assert wrapper.ocr_lines(pipeline, PNG) == "first line\nsecond line"
+    assert pipeline.path is not None
+    assert pipeline.path.suffix == ".png"
+    assert not pipeline.path.exists(), "the scratch directory is deleted before returning"
+    assert pipeline.options == {
+        "text_det_limit_side_len": wrapper.MAX_TEXT_SIDE,
+        "text_det_limit_type": "max",
+    }
+
+
+def test_ocr_lines_accepts_an_attribute_result() -> None:
+    pipeline = _OcrPipeline(_OcrPage(["a line"]))
+
+    assert wrapper.ocr_lines(pipeline, JPEG) == "a line"
+    assert pipeline.path is not None
+    assert pipeline.path.suffix == ".jpg"
+
+
+def test_ocr_lines_with_no_detections_is_empty() -> None:
+    assert wrapper.ocr_lines(_OcrPipeline({}), PNG) == ""
 
 
 def test_visible_characters_ignore_markup_and_placeholders() -> None:
