@@ -65,14 +65,15 @@ MINERU_SPEC = EngineSpec(
 )
 
 # A pipeline rather than a chat model, but it answers through the same OpenAI-compatible shape as
-# the rest, so one adapter reads it too. It keeps the roster's id and `native` kind; the upload runs
-# on an A10G rather than the L4 the recorded row used, because that pool was dry at deploy time.
+# the rest, so one adapter reads it too. Separate layout, OCR, table and formula models run in
+# sequence, so it is `staged` like the CPU path; the upload runs on an A10G rather than the L4 the
+# recorded row used, because that pool was dry at deploy time.
 PADDLE_SPEC = EngineSpec(
     id="paddleocr-gpu",
     name="PP-StructureV3 (GPU)",
-    kind="native",
+    kind="staged",
     pipeline="PaddleOCR's server models on a Modal A10G — layout, OCR, tables, formulas, reading order",
-    device="GPU (Modal A10G)",
+    device="remote · GPU A10G (Modal)",
     needs="PADDLE_OCR_BASE_URL",
 )
 

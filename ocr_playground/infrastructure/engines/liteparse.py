@@ -13,9 +13,9 @@ from ..versions import first_line
 FAST_SPEC = EngineSpec(
     id="liteparse-tesseract",
     name="LiteParse + Tesseract",
-    kind="baseline",
+    kind="staged",
     pipeline="raster + bundled Tesseract, parsed live on upload",
-    device="this server (CPU)",
+    device="native · CPU ×4 (Tesseract)",
     needs="nothing",
 )
 

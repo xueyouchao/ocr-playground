@@ -422,8 +422,10 @@ def test_a_rejected_mode_does_not_poison_the_next_request(api):
 
 def test_each_mode_names_its_own_engine_when_unconfigured(api):
     base, _ = api(glm_base_url="http://stub/v1")
+    # MinerU is `hybrid`, so it is the one a kind-based ranking would send to another GPU.
     for mode, name in (("chandra", "Chandra OCR 2"), ("nemotron", "Nemotron 3.5 Parse"),
-                       ("unlimited", "Unlimited-OCR"), ("paddle", "PP-StructureV3 (GPU)")):
+                       ("unlimited", "Unlimited-OCR"), ("mineru", "MinerU 2.5 (VLM)"),
+                       ("paddle", "PP-StructureV3 (GPU)")):
         status, _, body = call(base, "/api/parse", method="POST", body=b"%PDF", headers={
             "Content-Type": "application/pdf", "X-Mode": mode, "X-Filename": "x.pdf",
         })
