@@ -3,6 +3,13 @@
 Eight document parsers, one scanned form, side by side — a throwaway comparison turned into something
 you can run again.
 
+![The page: the scan on the left, one pane per parser on the right, each with its own text/preview toggle and find bar.](docs/screenshots/overview.png)
+
+Page 1 is the easy one. Page 6 is where they part company — the same flight-log table comes back as a
+markdown table, as loose numbers, or barely at all:
+
+![Page 6 read by every parser at once.](docs/screenshots/page-6.png)
+
 Open `site/index.html` and you get the scanned page on the left and every parser's output on the right, with
 a **text** / **preview** toggle per pane: `text` is exactly what the parser emitted, `preview` renders it
 (HTML in a sandboxed iframe with scripts blocked, markdown through a small converter).
