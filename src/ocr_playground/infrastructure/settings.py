@@ -55,11 +55,15 @@ class Settings:
     lit_path: str = ""
 
     # Pre-warming the GPU before an upload. Each warm is minutes of billed GPU time (boot plus
-    # scaledown_window), so it is throttled and capped rather than offered on every page view.
+    # scaledown_window), so it is throttled and capped per engine rather than offered on every page
+    # view. The interval has to fit inside `scaledown_window` (120 s in deploy/modal/serve_*.py): an
+    # engine that may only be woken after its container has scaled down is cold and un-warmable at
+    # the same time. The timeout has to outlast the boot it waits for, or a warm that worked is
+    # logged as a failure.
     warm_enabled: bool = True
-    warm_min_interval_seconds: int = 300
+    warm_min_interval_seconds: int = 120
     warm_daily_cap: int = 40
-    warm_timeout_seconds: int = 120
+    warm_timeout_seconds: int = 300
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -80,9 +84,9 @@ class Settings:
             lit_path=lit,
             warm_enabled=values.get("GLM_OCR_WARM", "1").strip().lower()
             not in ("0", "false", "no", "off"),
-            warm_min_interval_seconds=int(values.get("GLM_OCR_WARM_INTERVAL", "300")),
+            warm_min_interval_seconds=int(values.get("GLM_OCR_WARM_INTERVAL", "120")),
             warm_daily_cap=int(values.get("GLM_OCR_WARM_DAILY_CAP", "40")),
-            warm_timeout_seconds=int(values.get("GLM_OCR_WARM_TIMEOUT", "120")),
+            warm_timeout_seconds=int(values.get("GLM_OCR_WARM_TIMEOUT", "300")),
         )
 
     @classmethod

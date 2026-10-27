@@ -15,6 +15,7 @@ import pytest
 from ocr_playground.application.errors import EngineFailure, EngineTimeout
 from ocr_playground.domain.document import PageImage
 from ocr_playground.infrastructure.engines import GLM_SPEC, VlmEngine
+from ocr_playground.infrastructure.engines.vlm import MAX_HANDOFFS
 
 
 class Stub:
@@ -124,25 +125,49 @@ def test_jpeg_is_announced_as_jpeg(endpoint, tmp_path) -> None:
     assert url.startswith("data:image/jpeg;base64,")
 
 
+@pytest.mark.parametrize("code", [303, 307, 308])
 @pytest.mark.parametrize("relative", [False, True])
-def test_a_307_is_replayed_by_hand_with_the_same_post(endpoint, tmp_path, relative) -> None:
+def test_a_handoff_is_replayed_by_hand_with_the_same_post(endpoint, tmp_path, code, relative) -> None:
+    """A cold endpoint's redirect must reach the attempt URL as the same POST, page and all.
+
+    urllib follows a 303 by itself, as a GET with no body; a wrapper that only accepts POST answers
+    that with a 405 — after the client has already waited out the whole boot. So the replay is ours.
+    """
     def script(path, body):
         if path == "/chat/completions":
-            location = "/warm" if relative else stub.url + "/warm"
-            return 307, {"Location": location}, b""
-        return completion("warm text")
+            location = "/attempt" if relative else stub.url + "/attempt"
+            return code, {"Location": location}, b""
+        return completion("read after the handoff")
 
     stub, engine = endpoint(script)
-    assert engine.read(page(tmp_path), time.monotonic() + 30) == "warm text"
-    assert [request["path"] for request in stub.requests] == ["/chat/completions", "/warm"]
+    stub.get_status = 405  # what a wrapper answers a bodyless GET
+
+    assert engine.read(page(tmp_path), time.monotonic() + 30) == "read after the handoff"
+    assert [request["path"] for request in stub.requests] == ["/chat/completions", "/attempt"]
     assert stub.requests[0]["body"] == stub.requests[1]["body"], "the page must be re-sent"
+    assert stub.gets == [], "the redirect must never be replayed as a GET"
+
+
+def test_a_cold_start_may_hand_off_more_than_four_times(endpoint, tmp_path) -> None:
+    """The budget bounds a cold start, not a hop count: a boot can hand off more than four times."""
+    hops = {"n": 0}
+
+    def script(path, body):
+        hops["n"] += 1
+        if hops["n"] <= 6:
+            return 303, {"Location": f"/attempt/{hops['n']}"}, b""
+        return completion("read after six handoffs")
+
+    stub, engine = endpoint(script)
+    assert engine.read(page(tmp_path), time.monotonic() + 30) == "read after six handoffs"
+    assert stub.requests[-1]["path"] == "/attempt/6"
 
 
 def test_a_redirect_loop_is_reported(endpoint, tmp_path) -> None:
     holder: dict = {}
 
     def script(path, body):
-        return 307, {"Location": holder["stub"].url + "/again"}, b""
+        return 303, {"Location": holder["stub"].url + "/again"}, b""
 
     stub, engine = endpoint(script)
     holder["stub"] = stub
@@ -150,7 +175,7 @@ def test_a_redirect_loop_is_reported(endpoint, tmp_path) -> None:
     with pytest.raises(EngineFailure) as caught:
         engine.read(page(tmp_path), time.monotonic() + 30)
     assert "kept redirecting" in str(caught.value)
-    assert len(stub.requests) == 4
+    assert len(stub.requests) == MAX_HANDOFFS  # the loop guard, well before a 30 s budget
 
 
 def test_an_http_error_is_a_bad_gateway(endpoint, tmp_path) -> None:

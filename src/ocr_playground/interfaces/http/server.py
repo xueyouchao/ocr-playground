@@ -168,7 +168,8 @@ class Handler(BaseHTTPRequestHandler):
 
         Deliberately not on `GET /api/health`: a container bills GPU time from boot until it scales
         down, so warming every page view would rent a GPU for a trickle of traffic. The page calls
-        this when somebody picks GLM or reaches for the uploader, and the warmer throttles it.
+        this once per selected parser when somebody picks one or reaches for the uploader, and the
+        warmer throttles each engine on its own window.
         """
         self._discard_body()
         try:

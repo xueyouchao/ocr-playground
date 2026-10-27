@@ -40,6 +40,15 @@ GLM = EngineSpec(
     device="GPU (Modal L4)",
     needs="GLM_OCR_BASE_URL",
 )
+# The page's default parser, and a second warmable engine: one page can ask for several at once.
+CHANDRA = EngineSpec(
+    id="chandra-2",
+    name="Chandra OCR 2",
+    kind="vlm",
+    pipeline="Chandra 2 on a Modal L4 — layout-preserving markdown",
+    device="GPU (Modal L4)",
+    needs="CHANDRA_OCR_BASE_URL",
+)
 
 
 def registry(default_mode: str = "glm") -> EngineRegistry:
@@ -131,7 +140,7 @@ class FakeWarmEngine(FakeEngine):
         self.answers = answers
         self.warm_calls: list[float] = []
 
-    def warm(self, timeout: float = 120) -> bool:
+    def warm(self, timeout: float = 300) -> bool:
         self.warm_calls.append(timeout)
         return self.answers
 
