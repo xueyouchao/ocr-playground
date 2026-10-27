@@ -260,6 +260,44 @@ class Parked:
         raise ClientGone()
 
 
+@pytest.fixture(autouse=True)
+def _no_stagger(monkeypatch):
+    """The stagger is real in production and noise in a test that measures elapsed time."""
+    monkeypatch.setattr(read_document, "_STAGGER_LOW", 0.0)
+    monkeypatch.setattr(read_document, "_STAGGER_HIGH", 0.0)
+
+
+class Timed:
+    """Records when each engine started, for the stagger."""
+
+    def __init__(self, spec, log: list[tuple[str, float]]) -> None:
+        self.spec = spec
+        self.available = True
+        self._log = log
+
+    def identity(self) -> str:
+        return f"timed-{self.spec.id}"
+
+    def read(self, page: PageImage, deadline: float | None, cancel=None) -> str:
+        self._log.append((self.spec.id, time.monotonic()))
+        return "text"
+
+
+def test_the_rows_do_not_all_boot_at_once(tmp_path, png_bytes, monkeypatch) -> None:
+    """Four apps asked in the same instant race for one GPU; a tenth of a second apart they do not."""
+    monkeypatch.setattr(read_document, "_STAGGER_LOW", 0.05)
+    monkeypatch.setattr(read_document, "_STAGGER_HIGH", 0.06)
+    log: list[tuple[str, float]] = []
+    rig = build_rig(tmp_path, pages=1)
+    rig.service._engines["glm"] = Timed(GLM, log)
+    rig.service._engines["fast"] = Timed(FAST, log)
+
+    rig.service.execute(source(png_bytes), "glm,fast")
+
+    assert [engine_id for engine_id, _ in log] == [GLM.id, FAST.id], "the request order was not kept"
+    assert log[1][1] - log[0][1] > 0.04, "the second row started with the first"
+
+
 class Deaf:
     """A row parked inside a request it cannot interrupt — an upload already on the wire.
 

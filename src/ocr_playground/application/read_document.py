@@ -7,6 +7,7 @@ the engine read, so what the browser shows is what was parsed.
 """
 from __future__ import annotations
 
+import random
 import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -45,6 +46,15 @@ _COMPARISON_BUDGET = 240.0
 A single engine keeps the document budget — one engine is the whole page, and waiting is the only way
 to get it. A comparison is different: four rows that all say nothing is not a page, and a cold boot
 longer than four minutes is cheaper to retry than to sit through. Observed boots run 150–450 s.
+"""
+
+_STAGGER_LOW = 0.2
+_STAGGER_HIGH = 0.4
+"""How much later each row starts than the one before it.
+
+Four models means four apps asked to boot. Asked in the same instant they race one GPU and three queue;
+a fraction of a second apart they arrive as separate requests. The cost is under a second and a half
+per comparison against boots measured in minutes.
 """
 
 _STALL_GRACE = 90.0
@@ -207,9 +217,9 @@ class ReadDocumentService:
             try:
                 running = {
                     engine.spec.id: pool.submit(
-                        engine.read, image, budgets[engine.spec.id], cancel
+                        self._read_in_turn, index, engine, image, budgets[engine.spec.id], cancel
                     )
-                    for engine in pending
+                    for index, engine in enumerate(pending)
                 }
                 # Waiting in request order would hide a cancellation behind the first engine: a row
                 # parked in a request it cannot interrupt (an upload already on the wire) never sees
@@ -276,6 +286,15 @@ class ReadDocumentService:
             for engine in engines
             if engine.spec.id in failed
         ]
+
+    @staticmethod
+    def _read_in_turn(
+        index: int, engine: PageOcr, image: PageImage, deadline: float, cancel: Cancel | None
+    ) -> str:
+        """Start this engine after its turn, so a comparison does not ask every app to boot at once."""
+        if index:
+            time.sleep(index * random.uniform(_STAGGER_LOW, _STAGGER_HIGH))
+        return engine.read(image, deadline, cancel)
 
     def _first_failure(self, engines: Sequence[PageOcr], failed: Mapping[str, Exception]) -> Exception:
         """Nothing answered: report the primary engine's failure, which is the one that was asked for."""

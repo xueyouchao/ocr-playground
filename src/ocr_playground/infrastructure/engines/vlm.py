@@ -24,6 +24,7 @@ from __future__ import annotations
 import base64
 import http.client
 import json
+import random
 import sys
 import time
 import urllib.error
@@ -46,10 +47,16 @@ MAX_UPLOADS = 6
 # kilobyte, and a hop that comes back in a millisecond is not a boot in progress).
 _HOP_PAUSE = 0.05
 _RETRY_PAUSE = 2.0
-# A kilobyte probe that has not been answered in this long has told us nothing new: the edge is
-# holding it while a container boots. Asking again is cheap and is the only thing that lets a
-# cancelled read notice within seconds instead of sitting out the whole budget.
-_PROBE_SLICE = 10.0
+
+
+def _backoff(failures: int) -> float:
+    """Exponential, capped, and jittered.
+
+    Deterministic backoff makes every client that hit the same wall retry at the same instant, forever
+    aligned: four engines that all lost a race for one GPU keep re-asking as a wall, and each round they
+    lose the same way. Half-to-double spreads them out without ever retrying sooner than half the step.
+    """
+    return min(_RETRY_PAUSE * 2 ** min(failures - 1, 4), 30.0) * random.uniform(0.5, 1.5)
 
 GLM_SPEC = EngineSpec(
     id="glm-ocr",
@@ -234,21 +241,17 @@ class VlmEngine:
             request = urllib.request.Request(
                 url, data=data if ready else ping, headers=headers, method="POST"
             )
-            # A page is given the time it needs — inference is slow — but a probe is only a question,
-            # so it is asked in slices that end early enough for a cancelled read to be noticed.
+            # One wait for the whole budget, page or probe. A probe is the request the edge parks while
+            # a container boots, so cutting it short only throws away our place in that queue; a read
+            # that must stop early stops because the client left, not because a timer fired.
             wait = min(self._request_timeout, remaining)
             try:
-                with opener.open(request, timeout=wait if ready else min(wait, _PROBE_SLICE)) as response:
+                with opener.open(request, timeout=wait) as response:
                     answer = json.loads(response.read().decode())
             except TimeoutError:
-                if ready:
-                    raise EngineTimeout(
-                        f"the {self.spec.name} endpoint did not answer within the time limit"
-                    ) from None
-                # Parked with a kilobyte in hand: still booting, or still nobody home. Ask again.
-                url, failures = self._base_url + "/chat/completions", failures + 1
-                _pause(min(_RETRY_PAUSE, max(0.0, budget - time.monotonic() - 1)), cancel)
-                continue
+                raise EngineTimeout(
+                    f"the {self.spec.name} endpoint did not answer within the time limit"
+                ) from None
             except urllib.error.HTTPError as error:
                 # A cold start hands off however many times the container needs; only the budget,
                 # checked above, decides when that has gone on too long.
@@ -280,7 +283,7 @@ class VlmEngine:
                 failures += 1
                 # Back off: a boot is minutes long, so hammering it only wastes connections, while
                 # an endpoint that is genuinely gone should not be dialled 400 times.
-                pause = min(_RETRY_PAUSE * 2 ** min(failures - 1, 4), 30.0)
+                pause = _backoff(failures)
                 # The clock is read again here: the request that just failed may have eaten the rest
                 # of the budget, and a timeout the caller is waiting on must not be delayed by a sleep
                 # that was sized before the request ran.

@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 import threading
 import time
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -270,49 +272,52 @@ def test_a_flapping_endpoint_is_not_handed_the_page_forever(endpoint, tmp_path) 
     assert all(not request["body"].get("messages") for request in stub.requests)
 
 
-def test_a_probe_parked_by_the_edge_is_asked_again(endpoint, tmp_path, monkeypatch) -> None:
-    """The edge may hold a kilobyte open while a container boots. That is not an answer and not a
-    failure: the probe is asked again, and the page goes up once something answers."""
-    monkeypatch.setattr(vlm, "_PROBE_SLICE", 0.15)
-    cold = {"yes": True}
+def test_a_parked_probe_gets_the_whole_budget(tmp_path, monkeypatch) -> None:
+    """The edge parks the probe while a container boots. Cutting it short would abandon our place in
+    that queue and go to the back of it, which is slower than waiting."""
+    seen: list[float] = []
 
-    def script(path, body):
-        if cold["yes"] and body.get("messages"):
-            cold["yes"] = False
-            return 303, {"Location": "/cold"}, b""
-        if not body.get("messages"):
-            return 400, {}, {"error": "messages is required"}
-        return completion("read after a parked probe")
+    class Answer:
+        def read(self) -> bytes:
+            return json.dumps({"choices": [{"message": {"content": "read while parked"}}]}).encode()
 
-    stub, engine = endpoint(script)
-    stub.park_probes, stub.park_for = 1, 0.4
+        def __enter__(self):
+            return self
 
-    assert engine.read(
-        page(tmp_path, b"png" + b"\0" * 4096), time.monotonic() + 30
-    ) == "read after a parked probe"
-    assert stub.parked == ["/cold"], "the probe was the thing the edge parked"
-    assert stub.requests[-1]["body"]["messages"], "the page went up once a container answered"
+        def __exit__(self, *_exc) -> bool:
+            return False
+
+    class Opener:
+        def open(self, request, timeout=None):
+            seen.append(timeout)
+            if len(seen) == 1:  # the page: the edge answers with a handoff, nothing is serving yet
+                raise urllib.error.HTTPError(
+                    request.full_url, 303, "See Other", {"Location": "/cold"}, None
+                )
+            return Answer()
+
+    monkeypatch.setattr(vlm.urllib.request, "build_opener", lambda *a, **k: Opener())
+    engine = VlmEngine(
+        spec=GLM_SPEC, base_url="https://cold.example", model="m", prompt="p",
+        api_key="k", request_timeout=600,
+    )
+
+    assert engine.read(page(tmp_path, b"png" + b"\0" * 4096), time.monotonic() + 600) == \
+        "read while parked"
+    assert seen[-1] > 100, "the probe was cut short instead of being allowed to wait"
 
 
-def test_a_parked_probe_notices_a_client_that_left(endpoint, tmp_path, monkeypatch) -> None:
-    """A cancelled read must notice while it is parked, not after the edge finally answers."""
-    monkeypatch.setattr(vlm, "_PROBE_SLICE", 0.15)
-    started = time.monotonic()
+def test_the_retry_backoff_is_jittered(monkeypatch) -> None:
+    """Deterministic backoff keeps every loser of a GPU race aligned; jitter is what unsticks them."""
+    monkeypatch.setattr(vlm, "_RETRY_PAUSE", 2.0)
+    monkeypatch.setattr(vlm.random, "uniform", lambda low, high: 0.5)
+    low = vlm._backoff(3)
+    monkeypatch.setattr(vlm.random, "uniform", lambda low, high: 1.5)
+    high = vlm._backoff(3)
 
-    def script(path, body):
-        if body.get("messages"):
-            return 303, {"Location": "/cold"}, b""
-        return 400, {}, {"error": "messages is required"}
-
-    stub, engine = endpoint(script)
-    stub.park_probes, stub.park_for = 5, 0.4
-
-    def cancel() -> bool:
-        return time.monotonic() - started > 0.05
-
-    with pytest.raises(ClientGone):
-        engine.read(page(tmp_path, b"png" + b"\0" * 4096), time.monotonic() + 30, cancel)
-    assert time.monotonic() - started < 1.0, "it sat on the parked probe instead of noticing"
+    assert high == pytest.approx(3 * low), "the step is not spread"
+    assert high <= 30.0 * 1.5, "the cap stopped applying"
+    assert vlm._backoff(99) <= 45.0
 
 
 def test_a_cancelled_read_stops_walking_the_handoffs(endpoint, tmp_path) -> None:
