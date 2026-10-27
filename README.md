@@ -3,7 +3,7 @@
 Eight document parsers, one scanned form, side by side — a throwaway comparison turned into something
 you can run again.
 
-Open `index.html` and you get the scanned page on the left and every parser's output on the right, with
+Open `site/index.html` and you get the scanned page on the left and every parser's output on the right, with
 a **text** / **preview** toggle per pane: `text` is exactly what the parser emitted, `preview` renders it
 (HTML in a sandboxed iframe with scripts blocked, markdown through a small converter).
 
@@ -31,14 +31,14 @@ this deployment has an endpoint for — GLM, Nemotron, Unlimited-OCR, MinerU and
 stored.
 
 The bundled document is
-[`corpus/document.pdf`](corpus/document.pdf) — six pages from a demo corpus: one printed page and five
+[`data/corpus/document.pdf`](data/corpus/document.pdf) — six pages from a demo corpus: one printed page and five
 handwritten flight/field forms, read ahead of time by all eight systems. Where the scan came from, and
 what that means for redistributing it, is in [`THIRD_PARTY.md`](THIRD_PARTY.md#the-bundled-sample-document).
 
 ## Why it exists
 
 The original question was "why does our ingestion pipeline publish garbage for this PDF?" The answer is
-in `corpus/document.pdf` itself: its `creator` is `ocrmypdf 13.4.3 / Tesseract OCR-PDF v5.2.0`, so the
+in `data/corpus/document.pdf` itself: its `creator` is `ocrmypdf 13.4.3 / Tesseract OCR-PDF v5.2.0`, so the
 "text layer" is a 2023 Tesseract pass over the scan. Anything that trusts a text layer inherits that
 pass. Hence this shootout: what do the parsers that actually look at the pixels produce?
 
@@ -56,7 +56,7 @@ pass. Hence this shootout: what do the parsers that actually look at the pixels 
 | PaddleOCR PP-StructureV3 | layout → OCR → tables → order, mobile models | CPU |
 
 Each was run the way its project intends: native CLI or API, default prompts from the model cards, and
-`records/<id>.json` holds the raw output verbatim.
+`data/records/<id>.json` holds the raw output verbatim.
 
 Every card carries two chips. The first says where it runs — `native` on this host's CPU, or `remote`
 on a Modal L4 — and the second says how it reads a page: `vlm` (one vision-language model, one pass,
@@ -67,8 +67,8 @@ independent — PP-StructureV3 is `staged` on CPU and `staged` on GPU alike.
 ## Run it
 
 ```bash
-make pages          # corpus/document.pdf -> /tmp/ocr-playground/pages (200 dpi) + assets/pages (110 dpi)
-make site           # records/ -> evidence.json -> index.html
+make pages          # data/corpus/document.pdf -> /tmp/ocr-playground/pages (200 dpi) + site/pages (110 dpi)
+make site           # data/records/ -> site/evidence.json -> site/index.html
 make serve          # http://127.0.0.1:8080
 ```
 
@@ -135,9 +135,9 @@ model re-reads only what that change affects.
 ```bash
 python3 -m venv .venv-index
 .venv-index/bin/pip install -r requirements-cocoindex.txt
-.venv-index/bin/cocoindex update main.py            # corpus/ -> out/, default mode
+.venv-index/bin/cocoindex update scripts/index.py    # data/corpus/ -> out/, default mode
 
-OCR_CORPUS=scans OCR_MODE=fast .venv-index/bin/cocoindex update main.py
+OCR_CORPUS=scans OCR_MODE=fast .venv-index/bin/cocoindex update scripts/index.py
 ```
 
 It declares `out/documents/<path>.json` (per-page text and counts, plus the digest it was read
@@ -171,10 +171,11 @@ Modal deployment. Cold Modal endpoints answer with a `303`; the runner follows i
 
 ## Deploy it
 
-It is a static site: `index.html`, `assets/pages/*.jpg`, nothing else is needed at runtime.
+It is a static site: `index.html` and `pages/*.jpg`, nothing else is needed at runtime.
 
 ```bash
-rsync -av --delete index.html assets user@host:/var/www/ocr-playground/
+rsync -av site/index.html user@host:/var/www/ocr-playground/
+rsync -av --delete site/pages/ user@host:/var/www/ocr-playground/pages/
 ```
 
 `deploy/nginx.conf` is a minimal server block with cache headers for the page images. Any static host
@@ -232,22 +233,29 @@ is worth a compiled dependency, and how the suite replaces a port instead of pat
 ## Layout
 
 ```
-corpus/document.pdf      the six-page scan (source of truth)
+data/
+  corpus/document.pdf    the six-page scan (source of truth)
+  records/<id>.json      {"page-1": "text…", …} — raw output, never hand-edited
+  systems.json           the roster the page renders (name, pipeline, device, how to run)
+site/
+  template.html          the page: source rail, eight panes, text/preview + a find bar per pane
+  pages/*.jpg            the 110 dpi renders the rail shows (rebuilt by `make pages`)
+  evidence.json          generated: records joined against the roster
+  index.html             generated: template + inlined evidence, what gets published
+scripts/
+  prepare.py             render the scan -> /tmp/…/pages (parsers) + site/pages (rail)
+  collect.py             records + roster -> site/evidence.json
+  build.py               evidence + template -> site/index.html
+  index.py               CocoIndex entry point -> interfaces/indexer
 runners/                 one file per CPU parser; _common.py defines the record shape
 modal/                   one app per GPU parser, all scale-to-zero
-records/<id>.json        {"page-1": "text…", …} — raw output, never hand-edited
-systems.json             the roster the page renders (name, pipeline, device, how to run)
-template.html            the page: source rail, eight panes, text/preview + a find bar per pane
 ocr_playground/
   domain/                documents, readings, engines, ports, domain errors
   application/           the read-document use case and the two-slot gate
   infrastructure/        poppler, ImageMagick, LiteParse, GLM-OCR, settings, fingerprint
-  interfaces/            http/, indexer/, site/, evidence.py
+  interfaces/            http/, indexer/, site/ (+ layout.py, which names data/ and site/)
   composition/           the dependency-injector container
 api/server.py            compatibility entry point -> interfaces/http
-main.py                  CocoIndex entry point -> interfaces/indexer
-collect.py build.py      compatibility entry points -> interfaces/site
-prepare.py               compatibility entry point -> interfaces/site/prepare
 docs/architecture.md     the design note behind the structure
 tests/                   the offline suite; tests/fakes.py holds the doubles
 requirements.txt         dependency-injector, pinned (the upload service only)

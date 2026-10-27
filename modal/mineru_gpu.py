@@ -3,7 +3,7 @@
 The CPU row earlier used `-b pipeline -m ocr`, which is the mobile-ish path; this runs MinerU's own
 vision-language backend on an L4 and returns its per-page markdown from the content list.
 
-    modal run modal/mineru_gpu.py            # writes records/mineru-gpu.json
+    modal run modal/mineru_gpu.py            # writes data/records/mineru-gpu.json
     modal run modal/mineru_gpu.py --backend pipeline
 """
 import modal

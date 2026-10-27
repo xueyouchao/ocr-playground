@@ -1,6 +1,6 @@
 """The evidence shape, and the one function that produces it.
 
-This is a presentation contract, not a domain one. `records/<id>.json`, `evidence.json` and the
+This is a presentation contract, not a domain one. `data/records/<id>.json`, `site/evidence.json` and the
 upload API's response all share three keys, which is why the page needs exactly one branch for
 "bundled sample or live upload" (`state.uploaded || DATA`). Keeping the translation here means the
 domain aggregate never has to know the word "cells".

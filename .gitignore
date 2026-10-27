@@ -11,4 +11,7 @@ __pycache__/
 /out/
 /cocoindex.db
 
-# the page renders are rebuilt by prepare.py; the previews are small enough to keep
+# the page renders are rebuilt by scripts/prepare.py; the previews are small enough to keep
+
+# scratch screenshots of the page, not artefacts of the build
+.find-*.png
