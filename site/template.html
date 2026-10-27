@@ -1163,6 +1163,8 @@ function warmGpu() {
 $("uploader").addEventListener("pointerenter", warmGpu);
 $("uploader").addEventListener("focusin", warmGpu);
 
+const MAX_MODES = 3;
+
 $("mode-checks").addEventListener("change", (event) => {
   const box = event.target.closest("input[type=checkbox]");
   if (!box) return;
@@ -1170,6 +1172,12 @@ $("mode-checks").addEventListener("change", (event) => {
   if (!chosen.length) {
     // At least one parser has to stay checked: an empty picker is an upload with nothing to read.
     box.checked = true;
+    return;
+  }
+  if (chosen.length > MAX_MODES) {
+    // Three GPUs at once is what the pool carries; the fourth row would only queue behind them.
+    box.checked = false;
+    uploadStatus(`${MAX_MODES} parsers at a time is the most this compares — untick one first`, true);
     return;
   }
   state.modes = chosen;

@@ -215,6 +215,22 @@ def test_a_host_with_no_endpoint_reports_the_gpu_as_unavailable() -> None:
     assert Container().warmer().request("glm") == WarmStatus.UNAVAILABLE
 
 
+def test_every_l4_app_can_fall_back_to_a10g() -> None:
+    """L4 is what this account prefers and often cannot get; A10G is what it can.
+
+    Modal schedules a list in order of preference, so the app asks for both instead of waiting out a
+    drought: the L4 pool was empty for the forty minutes the playground spent showing nothing.
+    """
+    l4_apps = ["chandra", "glm_ocr", "mineru", "nemotron", "unlimited"]
+    misses = {
+        name: re.findall(r'gpu=(.*)', (ROOT / "deploy" / "modal" / f"serve_{name}.py").read_text())[0]
+        for name in l4_apps
+    }
+    for name, request in misses.items():
+        assert '"L4"' in request and '"A10G"' in request, f"{name} cannot fall back: {request}"
+        assert request.index('"L4"') < request.index('"A10G"'), f"{name} prefers A10G over L4"
+
+
 def test_every_modal_app_is_capped_at_one_container() -> None:
     """One upload asks each engine exactly once, and a client that gives up asks again.
 

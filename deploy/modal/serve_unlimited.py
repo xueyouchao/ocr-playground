@@ -33,7 +33,7 @@ PROMPT = "<image>document parsing."
 _state: dict = {}
 
 
-@app.function(image=image, gpu="L4", volumes={"/root/.cache/huggingface": hf_cache},
+@app.function(image=image, gpu=["L4", "A10G"], volumes={"/root/.cache/huggingface": hf_cache},
               timeout=1800, scaledown_window=120, startup_timeout=2400,
               # One request per engine per upload, and a client that gives up asks again: without a
               # cap the retry buys a second copy of a model that is already loading. Extra requests

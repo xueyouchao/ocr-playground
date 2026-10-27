@@ -30,7 +30,7 @@ MODEL = "zai-org/GLM-OCR"
 
 @app.function(
     image=image,
-    gpu="L4",                     # 24GB: a 0.9B VLM plus its KV cache fits with room to spare
+    gpu=["L4", "A10G"],                     # 24GB: a 0.9B VLM plus its KV cache fits with room to spare
     volumes={
         "/root/.cache/huggingface": hf_cache,
         # VLLM_CACHE_ROOT defaults to /root/.cache/vllm; the mount path has to match it.

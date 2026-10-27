@@ -33,7 +33,7 @@ from ...application.errors import (
 )
 from ...composition.container import Container, build_container
 from ...domain.document import SourceDocument
-from ...domain.errors import DomainError
+from ...domain.errors import DomainError, TooManyModes
 from ...domain.media import MediaType
 from ...infrastructure.process import CommandTimedOut
 from ..evidence import document_evidence
@@ -71,6 +71,10 @@ class UploadHTTPServer(ThreadingHTTPServer):
                  container: Container) -> None:
         self.container = container
         super().__init__(address, handler)
+
+
+MAX_COMPARISON = 3
+"""Parsers a single comparison may ask for; the picker offers the same number."""
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -156,7 +160,11 @@ class Handler(BaseHTTPRequestHandler):
         modes = [part.strip().lower() for part in raw.split(",") if part.strip()]
         for mode in modes:
             self.container.read_document().require_mode(mode)
-        return ",".join(dict.fromkeys(modes))
+        wanted = list(dict.fromkeys(modes))
+        if len(wanted) > MAX_COMPARISON:
+            # Three GPUs at once is what the plan and the pool can carry; a fourth row only queues.
+            raise TooManyModes(MAX_COMPARISON)
+        return ",".join(wanted)
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path.split("?")[0] == "/api/health":

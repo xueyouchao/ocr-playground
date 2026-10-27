@@ -39,7 +39,7 @@ from ocr_playground.application.errors import (
 )
 from ocr_playground.application.warming import EngineWarmer, WarmPolicy
 from ocr_playground.composition.container import Container
-from ocr_playground.domain.engine import EngineRegistry
+from ocr_playground.domain.engine import EngineRegistry, EngineSpec
 from ocr_playground.domain.errors import UnknownMode
 from ocr_playground.infrastructure.process import CommandTimedOut
 from ocr_playground.interfaces.evidence import document_evidence
@@ -162,6 +162,41 @@ def test_an_unknown_mode_names_the_two_choices(api) -> None:
     )
     assert status == 400
     assert payload(body) == {"error": "'nope' is not an extraction mode; use glm or fast"}
+
+
+def test_a_comparison_is_capped_at_three_parsers(api) -> None:
+    """Three GPUs at once is what the pool carries; a fourth row would only queue behind the others."""
+    service = StubService(document=sample_document())
+    extra = [
+        EngineSpec(id=f"extra{n}", name=f"Extra {n}", kind="vlm", pipeline="p", device="d",
+                   needs="a GPU")
+        for n in (1, 2)
+    ]
+    service.registry = EngineRegistry(
+        {"glm": GLM, "fast": FAST, **{spec.id: spec for spec in extra}}, "glm"
+    )
+    service._engines.update(
+        {spec.id: type("Engine", (), {"spec": spec})() for spec in extra}
+    )
+    base, _ = api(service=service)
+
+    status, _, body = call(
+        base, "/api/parse", method="POST", body=b"x",
+        headers={"Content-Type": "image/png", "X-Mode": "glm,fast,extra1,extra2"},
+    )
+
+    assert status == 400, "four parsers were accepted"
+    assert payload(body) == {"error": "a comparison reads at most 3 parsers at once"}
+
+
+def test_a_doubled_mode_is_not_a_second_parser(api) -> None:
+    """The cap counts parsers, not commas: asking for the same one twice is still one row."""
+    base, _ = api(service=StubService(document=sample_document()))
+    status, _, _ = call(
+        base, "/api/parse", method="POST", body=b"x",
+        headers={"Content-Type": "image/png", "X-Mode": "glm,glm,glm,glm"},
+    )
+    assert status != 400
 
 
 def test_glm_without_an_endpoint_says_so_and_offers_the_fast_path(api, tmp_path) -> None:
