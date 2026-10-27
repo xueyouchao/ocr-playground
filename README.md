@@ -25,7 +25,10 @@ TIFF, WebP), shown in the same layout. **GLM-OCR** is the default — it reads h
 best, but it runs on a scale-to-zero GPU, so the first upload after idle takes about three minutes
 while the model boots — it then stays warm for two minutes after the last request, so another
 upload inside that window takes about five seconds a page. **LiteParse + Tesseract** is the fast option: a couple of seconds per page on
-the server's CPU, and visibly weaker on handwriting. Nothing is stored.
+the server's CPU, and visibly weaker on handwriting. The picker also lists every other GPU parser
+this deployment has an endpoint for — Chandra, Nemotron, Unlimited-OCR, MinerU and
+**PP-StructureV3 (GPU)** — and several can be ticked to read the same pages side by side. Nothing is
+stored.
 
 The bundled document is
 [`corpus/document.pdf`](corpus/document.pdf) — six pages from a demo corpus: one printed page and five
@@ -77,22 +80,25 @@ CHANDRA_OCR_BASE_URL=https://<chandra-app>.modal.run/v1 \
 NEMOTRON_PARSE_BASE_URL=https://<nemotron-app>.modal.run/v1 \
 UNLIMITED_OCR_BASE_URL=https://<unlimited-app>.modal.run/v1 \
 MINERU_BASE_URL=https://<mineru-app>.modal.run/v1 \
+PADDLE_OCR_BASE_URL=https://<paddle-app>.modal.run/v1 \
 make api
 make api                                      # no endpoint: fast (LiteParse + Tesseract) only
 ```
 
-The five GPU apps are `modal deploy modal/serve_{glm_ocr,chandra,nemotron,unlimited,mineru}.py`,
-one L4 each, all scaled to zero when idle. The four VLM wrappers share one HF cache volume, so the
-first boot of each pays for its own weights once; MinerU keeps its models in its own volume.
+The six GPU apps are `modal deploy modal/serve_{glm_ocr,chandra,nemotron,unlimited,mineru,paddle}.py`,
+one GPU each, all scaled to zero when idle. Five run on an L4; PP-StructureV3 runs on an A10G, also
+24 GB, because the L4 pool was out of capacity when its wrapper was deployed. The VLM wrappers share
+one HF cache volume, so the first boot of each pays for its own weights once; MinerU keeps its models
+in its own volume, and PP-StructureV3 in PaddleX's.
 
 `make test` runs the offline suite (no GPU, no LiteParse, no poppler). The fast path needs LiteParse
 (`pip install liteparse==2.17.0`, which provides the `lit` CLI) and Tesseract on the host or in the
 image.
 
 `GET /api/health` reports which modes this server can run — `glm`, `fast`, `chandra`, `nemotron`,
-`unlimited`, `mineru`, each with its name, availability and cold-start note, which is what the page's picker
-is built from. `POST /api/parse` takes the file as the body and `X-Mode: glm|fast|chandra|nemotron|
-unlimited|mineru` (or `?mode=`); with neither, it uses GLM-OCR.
+`unlimited`, `mineru`, `paddle`, each with its name, availability and cold-start note, which is what
+the page's picker is built from. `POST /api/parse` takes the file as the body and `X-Mode:
+glm|fast|chandra|nemotron|unlimited|mineru|paddle` (or `?mode=`); with neither, it uses GLM-OCR.
 
 A comma-separated list asks for a comparison: `X-Mode: chandra,nemotron` reads the same rendered
 pages with both, concurrently, and the response carries one system and one cell per engine. An

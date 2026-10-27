@@ -1,9 +1,10 @@
-"""The VLM parsers, all behind one OpenAI-compatible shape.
+"""The GPU parsers, all behind one OpenAI-compatible shape.
 
-GLM-OCR is served by vLLM; Chandra OCR 2, Nemotron 3.5 Parse and Unlimited-OCR are each a small
-FastAPI wrapper around the model's own documented entry point. All four answer
-`POST /v1/chat/completions` with an image part in the message, so one adapter reads all four, and
-what differs between them is the *spec* — who the model is, and what it costs to run.
+GLM-OCR is served by vLLM; Chandra OCR 2, Nemotron 3.5 Parse, Unlimited-OCR and MinerU 2.5 are each
+a small FastAPI wrapper around the model's own documented entry point, and PP-StructureV3 is a
+wrapper around PaddleOCR's pipeline. All six answer `POST /v1/chat/completions` with an image part
+in the message, so one adapter reads them, and what differs is the *spec* — who the parser is, and
+what it costs to run.
 
 Those wrappers ignore the client's text: each model was trained on its own task prompt, and passing
 "convert to markdown" to them would measure a different model than the one their card ships. The
@@ -32,7 +33,7 @@ GLM_SPEC = EngineSpec(
     name="GLM-OCR",
     kind="vlm",
     pipeline="0.9B VLM on a Modal L4 (vLLM) — cold starts take about 3 minutes",
-    device="GPU (Modal L4)",
+    device="remote · GPU L4 (Modal)",
     needs="GLM_OCR_BASE_URL",
 )
 
@@ -41,7 +42,7 @@ CHANDRA_SPEC = EngineSpec(
     name="Chandra OCR 2",
     kind="vlm",
     pipeline="Chandra 2 on a Modal L4 — layout-preserving markdown, its own ocr_layout task",
-    device="GPU (Modal L4)",
+    device="remote · GPU L4 (Modal)",
     needs="CHANDRA_OCR_BASE_URL",
 )
 
@@ -50,17 +51,29 @@ NEMOTRON_SPEC = EngineSpec(
     name="Nemotron 3.5 Parse",
     kind="vlm",
     pipeline="NVIDIA Nemotron 3.5 Parse on a Modal L4 — markdown with HTML tables",
-    device="GPU (Modal L4)",
+    device="remote · GPU L4 (Modal)",
     needs="NEMOTRON_PARSE_BASE_URL",
 )
 
 MINERU_SPEC = EngineSpec(
     id="mineru-gpu",
     name="MinerU 2.5 (VLM)",
-    kind="vlm",
+    kind="hybrid",
     pipeline="MinerU2.5-1.2B with its layout and table models on a Modal L4 — page-by-page markdown",
-    device="GPU (Modal L4)",
+    device="remote · GPU L4 (Modal)",
     needs="MINERU_BASE_URL",
+)
+
+# A pipeline rather than a chat model, but it answers through the same OpenAI-compatible shape as
+# the rest, so one adapter reads it too. It keeps the roster's id and `native` kind; the upload runs
+# on an A10G rather than the L4 the recorded row used, because that pool was dry at deploy time.
+PADDLE_SPEC = EngineSpec(
+    id="paddleocr-gpu",
+    name="PP-StructureV3 (GPU)",
+    kind="native",
+    pipeline="PaddleOCR's server models on a Modal A10G — layout, OCR, tables, formulas, reading order",
+    device="GPU (Modal A10G)",
+    needs="PADDLE_OCR_BASE_URL",
 )
 
 UNLIMITED_SPEC = EngineSpec(
@@ -68,7 +81,7 @@ UNLIMITED_SPEC = EngineSpec(
     name="Unlimited-OCR",
     kind="vlm",
     pipeline="Baidu Unlimited-OCR on a Modal L4 — long pages, crop-and-stitch",
-    device="GPU (Modal L4)",
+    device="remote · GPU L4 (Modal)",
     needs="UNLIMITED_OCR_BASE_URL",
 )
 

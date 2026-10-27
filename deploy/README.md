@@ -34,6 +34,11 @@ The upload API is its own container, sharing the hostname under `/api` (Traefik 
 docker build -t ocr-playground-api:latest -f api/Dockerfile .
 docker run -d --name ocr-playground-api --restart unless-stopped \
   -e GLM_OCR_BASE_URL=https://<workspace>--ocr-playground-glm-ocr-serve.modal.run/v1 \
+  -e CHANDRA_OCR_BASE_URL=https://<workspace>--ocr-playground-chandra-web.modal.run/v1 \
+  -e NEMOTRON_PARSE_BASE_URL=https://<workspace>--ocr-playground-nemotron-web.modal.run/v1 \
+  -e UNLIMITED_OCR_BASE_URL=https://<workspace>--ocr-playground-unlimited-web.modal.run/v1 \
+  -e MINERU_BASE_URL=https://<workspace>--ocr-playground-mineru-web.modal.run/v1 \
+  -e PADDLE_OCR_BASE_URL=https://<workspace>--ocr-playground-paddle-web.modal.run/v1 \
   --label traefik.enable=true \
   --label 'traefik.http.routers.ocr-playground-api.rule=Host(`ocr-playground.srv1567269.hstgr.cloud`) && PathPrefix(`/api`)' \
   --label traefik.http.routers.ocr-playground-api.entrypoints=websecure \
@@ -43,11 +48,13 @@ docker run -d --name ocr-playground-api --restart unless-stopped \
   ocr-playground-api:latest
 ```
 
-`GLM_OCR_BASE_URL` points at the app from `modal deploy modal/serve_glm_ocr.py`; Modal prints the URL,
-and the served name is `glm-ocr`. Leave the variable out and the container still serves, with GLM-OCR
-reported unavailable and the fast path (LiteParse + Tesseract) the only one — the page will say so and
-select it. The GPU scales to zero, so the first upload after idle waits minutes for vLLM to boot; the
-container holds the request for up to `GLM_OCR_BUDGET_SECONDS` (900 s) rather than giving up.
+Each `*_BASE_URL` points at the app from the matching `modal deploy modal/serve_*.py`; Modal prints
+the URL, and the served name follows the wrapper. `PADDLE_OCR_BASE_URL` comes from
+`modal deploy modal/serve_paddle.py` (app `ocr-playground-paddle`, an A10G because the L4 pool was
+dry). Leave any variable out and that mode is listed but greyed out rather than failing an upload;
+with `GLM_OCR_BASE_URL` missing, the page selects the fast path (LiteParse + Tesseract) instead. The
+GPUs scale to zero, so the first upload after idle waits minutes for the model to boot; the container
+holds the request for up to `GLM_OCR_BUDGET_SECONDS` (900 s) rather than giving up.
 
 It is unauthenticated and public, and so is the Modal endpoint behind it. The only defences are the
 caps in `api/server.py` (20 MB, 5 pages, 120 s per fast parse, 900 s for a whole GLM document, two

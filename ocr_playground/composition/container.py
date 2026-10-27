@@ -27,6 +27,7 @@ from ..infrastructure.engines import (
     GLM_SPEC,
     MINERU_SPEC,
     NEMOTRON_SPEC,
+    PADDLE_SPEC,
     UNLIMITED_SPEC,
     LiteParseEngine,
     VlmEngine,
@@ -66,7 +67,7 @@ class Container(containers.DeclarativeContainer):
         quality=settings.provided.preview_quality,
     )
 
-    # One adapter, four endpoints. `fast` stays second so the "use the fast option" message a
+    # One adapter, six endpoints. `fast` stays second so the "use the fast option" message a
     # missing GPU produces is still the one that names the CPU path.
     glm = providers.Singleton(
         VlmEngine,
@@ -119,6 +120,16 @@ class Container(containers.DeclarativeContainer):
         api_key=settings.provided.glm_api_key,
         request_timeout=settings.provided.glm_request_timeout,
     )
+    paddle = providers.Singleton(
+        VlmEngine,
+        spec=PADDLE_SPEC,
+        base_url=settings.provided.paddle_base_url,
+        model="paddleocr",
+        # PP-StructureV3 takes no prompt; this only names the task the wrapper was asked for.
+        prompt="pp-structurev3",
+        api_key=settings.provided.glm_api_key,
+        request_timeout=settings.provided.glm_request_timeout,
+    )
     engines = providers.Dict(
         glm=glm,
         fast=fast,
@@ -126,6 +137,7 @@ class Container(containers.DeclarativeContainer):
         nemotron=nemotron,
         unlimited=unlimited,
         mineru=mineru,
+        paddle=paddle,
     )
 
     registry = providers.Singleton(
