@@ -186,7 +186,7 @@
   Every pane is a parser run the way its own project intends. The baseline is an <b>open-source,
   text-based CPU pipeline</b> (LiteParse + Tesseract): no GPU, a couple of seconds per page, and a
   predictable cost, so it is the reference the other panes are read against. The comparison is
-  <b>open-source VLM-based OCR</b> (GLM-OCR, Chandra OCR 2, Nemotron Parse, Unlimited-OCR, MinerU 2.5),
+  <b>open-source VLM-based OCR</b> (Chandra OCR 2, Nemotron Parse, GLM-OCR, Unlimited-OCR, MinerU 2.5),
   which reads handwriting and
   tables noticeably better but needs a GPU. <b>General-purpose vision-language models</b> such as
   Anthropic's Claude Opus were not chosen: their per-page cost and latency are far higher than either

@@ -122,10 +122,10 @@ temperature 0 for the VLMs, one page per call.
 
 | system | approach | runs on |
 | --- | --- | --- |
-| GLM-OCR | 0.9B VLM, 128K context | Modal L4 (vLLM) |
 | Chandra OCR 2 | datalab VLM, layout-rich HTML out | Modal L4 |
-| Unlimited-OCR | tiled 640 px inference for long pages | Modal L4 |
 | Nemotron 3.5 Parse | NVIDIA VLM + the model repo's own postprocessing | Modal L4 |
+| GLM-OCR | 0.9B VLM, 128K context | Modal L4 (vLLM) |
+| Unlimited-OCR | tiled 640 px inference for long pages | Modal L4 |
 | PP-StructureV3 (GPU) | PP-DocLayout-L + PP-OCRv5 server + table/formula/chart branches | Modal L4 |
 | MinerU 2.5 (VLM) | MinerU2.5-1.2B + layout/table models | Modal L4 |
 | LiteParse + Tesseract | PDFium raster + bundled Tesseract, layout by grid projection | CPU ×4 |

@@ -1,14 +1,5 @@
 [
   {
-    "id": "glm-ocr",
-    "name": "GLM-OCR",
-    "kind": "vlm",
-    "pipeline": "0.9B VLM, 128K ctx \u2014 one page in, markdown out (vLLM or Zhipu API)",
-    "runner": "runners/vlm_endpoint.py --model glm-ocr",
-    "needs": "GPU (vLLM) or Zhipu API key",
-    "device": "remote \u00b7 GPU L4 (Modal)"
-  },
-  {
     "id": "chandra-2",
     "name": "Chandra OCR 2",
     "kind": "vlm",
@@ -18,21 +9,30 @@
     "device": "remote \u00b7 GPU L4 (Modal)"
   },
   {
-    "id": "unlimited-ocr",
-    "name": "Unlimited-OCR",
-    "kind": "vlm",
-    "pipeline": "tiled 640px \"gundam\" inference for long pages \u2014 page in, markdown out (vLLM)",
-    "runner": "runners/vlm_endpoint.py --model unlimited-ocr",
-    "needs": "GPU (vLLM) or Baidu Qianfan key",
-    "device": "remote \u00b7 GPU L4 (Modal)"
-  },
-  {
     "id": "nemotron-parse",
     "name": "Nemotron 3.5 Parse",
     "kind": "vlm",
     "pipeline": "NVIDIA VLM document parser \u2014 page in, markdown/structured out (NIM or vLLM)",
     "runner": "runners/vlm_endpoint.py --model nemotron-3.5-parse",
     "needs": "NVIDIA NIM API key or GPU",
+    "device": "remote \u00b7 GPU L4 (Modal)"
+  },
+  {
+    "id": "glm-ocr",
+    "name": "GLM-OCR",
+    "kind": "vlm",
+    "pipeline": "0.9B VLM, 128K ctx \u2014 one page in, markdown out (vLLM or Zhipu API)",
+    "runner": "runners/vlm_endpoint.py --model glm-ocr",
+    "needs": "GPU (vLLM) or Zhipu API key",
+    "device": "remote \u00b7 GPU L4 (Modal)"
+  },
+  {
+    "id": "unlimited-ocr",
+    "name": "Unlimited-OCR",
+    "kind": "vlm",
+    "pipeline": "tiled 640px \"gundam\" inference for long pages \u2014 page in, markdown out (vLLM)",
+    "runner": "runners/vlm_endpoint.py --model unlimited-ocr",
+    "needs": "GPU (vLLM) or Baidu Qianfan key",
     "device": "remote \u00b7 GPU L4 (Modal)"
   },
   {

@@ -45,10 +45,10 @@ pass. Hence this shootout: what do the parsers that actually look at the pixels 
 
 | system | pipeline | runs where |
 |---|---|---|
-| GLM-OCR | 0.9B VLM | Modal L4 (vLLM) |
 | Chandra OCR 2 (default) | datalab VLM | Modal L4 |
-| Unlimited-OCR | tiled VLM | Modal L4 |
 | Nemotron 3.5 Parse | NVIDIA VLM + the repo's own postprocessing | Modal L4 |
+| GLM-OCR | 0.9B VLM | Modal L4 (vLLM) |
+| Unlimited-OCR | tiled VLM | Modal L4 |
 | PP-StructureV3 (GPU) | server models, tables, chart branch | Modal L4 |
 | MinerU 2.5 (VLM) | VLM backend, page by page | Modal L4 |
 | LiteParse + Tesseract | raster + bundled Tesseract | CPU |

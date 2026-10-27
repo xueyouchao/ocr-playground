@@ -43,6 +43,12 @@ def build_site(tmp_path: Path, records: dict[str, dict[str, str | None]]) -> Pat
     return tmp_path
 
 
+def test_the_offline_comparison_opens_with_chandra_and_nemotron() -> None:
+    systems = json.loads((ROOT / "systems.json").read_text(encoding="utf-8"))
+
+    assert [system["id"] for system in systems[:2]] == ["chandra-2", "nemotron-parse"]
+
+
 def test_the_two_cpu_systems_render_last() -> None:
     systems = json.loads((ROOT / "systems.json").read_text(encoding="utf-8"))
 
