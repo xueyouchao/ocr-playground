@@ -89,7 +89,9 @@ def test_health_reports_modes_and_limits(api) -> None:
     assert health["ok"] is True
     assert health["default_mode"] == "glm"
     modes = {mode["id"]: mode for mode in health["modes"]}
-    assert tuple(modes) == ("glm", "fast", "chandra", "nemotron", "unlimited", "mineru")
+    assert tuple(modes) == (
+        "glm", "fast", "chandra", "nemotron", "unlimited", "mineru", "paddle",
+    )
     assert modes["glm"] == {
         "id": "glm",
         "name": "GLM-OCR",
@@ -422,7 +424,8 @@ def test_each_mode_names_its_own_engine_when_unconfigured(api):
     base, _ = api(glm_base_url="http://stub/v1")
     # MinerU is `hybrid`, so it is the one a kind-based ranking would send to another GPU.
     for mode, name in (("chandra", "Chandra OCR 2"), ("nemotron", "Nemotron 3.5 Parse"),
-                       ("unlimited", "Unlimited-OCR"), ("mineru", "MinerU 2.5 (VLM)")):
+                       ("unlimited", "Unlimited-OCR"), ("mineru", "MinerU 2.5 (VLM)"),
+                       ("paddle", "PP-StructureV3 (GPU)")):
         status, _, body = call(base, "/api/parse", method="POST", body=b"%PDF", headers={
             "Content-Type": "application/pdf", "X-Mode": mode, "X-Filename": "x.pdf",
         })

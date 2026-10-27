@@ -5,6 +5,7 @@ from .vlm import (
     GLM_SPEC,
     MINERU_SPEC,
     NEMOTRON_SPEC,
+    PADDLE_SPEC,
     UNLIMITED_SPEC,
     VlmEngine,
 )
@@ -15,6 +16,7 @@ __all__ = [
     "GLM_SPEC",
     "MINERU_SPEC",
     "NEMOTRON_SPEC",
+    "PADDLE_SPEC",
     "UNLIMITED_SPEC",
     "LiteParseEngine",
     "VlmEngine",

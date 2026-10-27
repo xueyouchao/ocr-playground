@@ -194,7 +194,8 @@
     <b>Read your own document</b>
     <span>A PDF (up to 5 pages) or one image. <b>GLM-OCR</b> reads handwriting and tables best, but its GPU
       scales to zero: the first upload after idle waits ~3 minutes for boot, then ~5 seconds a page while
-      warm (2 minutes). <b>LiteParse + Tesseract</b> is CPU-fast, but weaker on handwriting.</span>
+      warm (2 minutes). <b>LiteParse + Tesseract</b> is CPU-fast, but weaker on handwriting.
+      <b>PP-StructureV3 (GPU)</b>, PaddleOCR's own pipeline, is there too — structured tables and charts.</span>
     <div class="modes" id="modes">
       <span class="modes-label" id="modes-label">read it with</span>
       <div class="checks" id="mode-checks" role="group" aria-labelledby="modes-label">
@@ -1025,7 +1026,7 @@ $("preview-all").addEventListener("click", () => {
 });
 
 // ---------- read your own document ----------
-// The upload runs on the same origin, behind the same Traefik router (`/api`). The VLM parsers —
+// The upload runs on the same origin, behind the same Traefik router (`/api`). The GPU parsers —
 // GLM-OCR by default, plus the others this host has an endpoint for — run on scale-to-zero GPUs,
 // read handwriting and tables best, and pay a cold start of about three minutes before the first
 // page comes back. LiteParse + Tesseract, on this server's CPU, answers in seconds. The panel says

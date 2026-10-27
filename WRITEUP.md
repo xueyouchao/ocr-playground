@@ -145,26 +145,33 @@ different processes:
 - **The page** is static files — no server needed, and its images never change, so they cache for a
   year.
 - **The API** is a small Python service wired with a dependency-injection container. It renders
-  uploads with poppler, then parses them through one of two paths, in its own container behind the
-  same Traefik router at `/api`.
+  uploads with poppler, then parses them through whichever GPU endpoints the deployment has, in its
+  own container behind the same Traefik router at `/api`.
 
 | mode | parser | where | character |
 | --- | --- | --- | --- |
 | `glm` (default) | GLM-OCR, a 0.9B VLM | Modal L4, scale-to-zero | best on handwriting and tables; cold start of minutes after idle |
 | `fast` | LiteParse + Tesseract | this server's CPU | ~2 s/page; visibly weaker on the same pages |
+| `chandra` | Chandra OCR 2 | Modal L4, scale-to-zero | the slowest, about a minute a page |
+| `nemotron` | Nemotron 3.5 Parse | Modal L4, scale-to-zero | about 5 s a warm page, markdown with tables |
+| `unlimited` | Unlimited-OCR | Modal L4, scale-to-zero | about 45 s a page; crops and stitches long pages |
+| `mineru` | MinerU 2.5 (VLM) | Modal L4, scale-to-zero | about 70 s a page, its VLM backend |
+| `paddle` | PP-StructureV3 (GPU) | Modal A10G, scale-to-zero | PaddleOCR's server models: layout, OCR, tables, formulas and charts; about 2 s a warm page |
 
 A warm GLM page took about six seconds in testing, the fast path about two, and the first request
-after idle paid roughly ninety seconds before vLLM answered. The budget is deliberately generous: the
-GPU may need minutes, and a request that gives up early is worse than one that explains itself while
-it waits. The page keeps a running status line with exactly that explanation, and offers the fast
-path beside it.
+after idle paid roughly ninety seconds before vLLM answered. A warm PP-StructureV3 page took about
+two seconds, and its reading of page 1 matched the recorded L4 row character for character. The budget
+is deliberately generous: the GPU may need minutes, and a request that gives up early is worse than
+one that explains itself while it waits. The page keeps a running status line with exactly that
+explanation, and offers the fast path beside it.
 
 Contract: `POST /api/parse` with the file as the request body, a `Content-Type`, an `X-Filename`
 header (percent-encoded — header values are Latin-1, so `扫描.png` cannot ride in one verbatim), and
-`X-Mode: glm|fast` (or `?mode=fast`). With no mode it is GLM-OCR. The response is the evidence shape
-above, with one system. `GET /api/health` reports which modes this server can actually run and the
-limits; the page reads it to disable GLM-OCR when the deployment has no endpoint, and to select the
-fast path rather than fail the first upload.
+`X-Mode: glm|fast|chandra|nemotron|unlimited|mineru|paddle` (or `?mode=fast`). With no mode it is
+GLM-OCR. The response is the evidence shape above, with one system per selected engine.
+`GET /api/health` reports which modes this server can actually run and the limits; the page reads it
+to disable GLM-OCR when the deployment has no endpoint, and to select the fast path rather than fail
+the first upload.
 
 **The same reading, indexed.** Reading is a use case (`application/read_document.py`); the HTTP
 handler is a shell around it and the indexer is a second caller.
@@ -175,11 +182,11 @@ file, switching modes or changing the model re-reads exactly the documents that 
 the six-page sample plus a PNG, the fast path read seven pages in 21.6 s, and a switch to GLM re-read
 one page after its 156.8 s cold start, producing the same 1,234 characters the upload path shows.
 
-**Why not all eight live?** The other GPU-class models need their own deployments and multi-minute
-cold starts, and the CPU PaddleOCR pipeline is too heavy to answer inside a request on a four-core
-box. Two paths cover the range the page is making a point about — a VLM that reads handwriting, and a
-classic OCR pass that is fast — without turning a demo into a queue. The upload pane is therefore a
-single pane either way.
+**Why not all eight live?** The CPU PP-StructureV3 row is the one that stays offline: its
+mobile-model pipeline is too heavy to answer inside a request on a four-core box, and the GPU build
+of the same pipeline is deployed instead. The GPU parsers run as separate scale-to-zero apps, one GPU
+each; a comparison pays every cold start it ticked, which is why the picker says so before the upload
+starts.
 
 The security model is "bounds, and nothing on disk":
 
@@ -187,10 +194,10 @@ The security model is "bounds, and nothing on disk":
 | --- | --- | --- |
 | request body | 20 MiB | rejects before reading |
 | pages | 5 | poppler render time is linear |
-| concurrent parses | 2 | the fast path is CPU-bound; a GLM upload holds its slot while it waits |
+| concurrent parses | 2 | the fast path is CPU-bound; a GPU upload holds its slot while it waits |
 | socket timeout | 30 s | a silent client cannot own a thread |
 | fast parse timeout | 120 s | per subprocess |
-| GLM budget | 900 s | cold start plus five pages; the request is held, not dropped |
+| GPU budget | 900 s | cold start plus five pages; the request is held, not dropped |
 | storage | none | temp dir deleted before the response is sent |
 
 The subtle one: the parse slot is acquired **before** the body is read. Otherwise an upload that

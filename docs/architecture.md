@@ -7,7 +7,8 @@ in or a way out, and the structure says so.
 ocr_playground/
   domain/            what a document, a page reading and an engine are; what a bad request means
   application/       use cases: read this document, hold a parse slot
-  infrastructure/    adapters: poppler, ImageMagick, LiteParse, GLM-OCR, settings, temp dirs
+  infrastructure/    adapters: poppler, ImageMagick, LiteParse, the OpenAI-compatible GPU
+                     endpoints, settings, temp dirs
   interfaces/        ways in: HTTP, the CocoIndex indexer, the static site build
   composition/       the dependency-injection container that wires the four together
 ```
@@ -23,7 +24,7 @@ the whole graph.
 | port | what the application asks for | production adapter |
 | --- | --- | --- |
 | `PageRenderer` | bytes → numbered page images, honouring a page limit | poppler + ImageMagick |
-| `PageOcr` | one page → text, plus availability and an identity string | LiteParse, GLM-OCR |
+| `PageOcr` | one page → text, plus availability and an identity string | LiteParse + Tesseract; every OpenAI-compatible GPU endpoint (GLM-OCR, Chandra, Nemotron, Unlimited-OCR, MinerU, PP-StructureV3) |
 | `PreviewEncoder` | a page image → a data URL | ImageMagick |
 | `Workspace` | a scratch directory, deleted on exit | `tempfile.TemporaryDirectory` |
 | `Clock` | monotonic seconds, for the document budget | `time.monotonic` |

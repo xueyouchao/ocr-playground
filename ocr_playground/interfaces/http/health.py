@@ -41,6 +41,10 @@ MODE_COPY: dict[str, dict[str, object]] = {
         "cold_start": True,
         "detail": "MinerU 2.5 on a scale-to-zero GPU; its VLM backend, about 70 s a page",
     },
+    "paddle": {
+        "cold_start": True,
+        "detail": "PP-StructureV3 on a scale-to-zero A10G; server models with tables and charts, about 2 s a warm page",
+    },
 }
 
 
