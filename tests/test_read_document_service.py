@@ -10,6 +10,7 @@ import time
 import pytest
 
 from fakes import FAST, GLM, FakeEngine, build_rig
+from ocr_playground.application import read_document
 from ocr_playground.application.errors import (
     ClientGone,
     EngineFailure,
@@ -289,6 +290,38 @@ def test_a_cancellation_is_not_queued_behind_a_deaf_engine(tmp_path, png_bytes) 
         rig.service.execute(source(png_bytes), "glm,fast")
 
     assert time.monotonic() - started < 1.5, "the cancellation waited behind the deaf engine"
+
+
+def test_a_comparison_that_produced_nothing_gives_up(tmp_path, png_bytes, monkeypatch) -> None:
+    """No row has answered, so there is nothing to show: waiting out the 900 s budget buys nothing."""
+    monkeypatch.setattr(read_document, "_COMPARISON_BUDGET", 0.3)
+    rig = build_rig(tmp_path, pages=1)
+    rig.service._engines["glm"] = Deaf()
+    rig.service._engines["fast"] = Deaf()
+
+    started = time.monotonic()
+    with pytest.raises(EngineTimeout) as raised:
+        rig.service.execute(source(png_bytes), "glm,fast")
+
+    assert time.monotonic() - started < 2.0, "it waited the whole document budget"
+    assert "did not answer in time" in str(raised.value)
+
+
+def test_a_row_that_answered_does_not_wait_out_a_dead_one(tmp_path, png_bytes, monkeypatch) -> None:
+    """One good row plus one dead row is a page, not a reason to hold the page for a quarter hour."""
+    monkeypatch.setattr(read_document, "_STALL_GRACE", 0.3)
+    rig = build_rig(tmp_path, pages=1)
+    rig.service._engines["glm"] = Deaf()
+    rig.service._engines["fast"] = FakeEngine(FAST)
+
+    started = time.monotonic()
+    document = rig.service.execute(source(png_bytes), "glm,fast")
+
+    assert time.monotonic() - started < 1.5, "it waited for the dead row"
+    page = document.pages[0]
+    assert [one.engine_id for one in page.readings] == [FAST.id]
+    assert [one.engine_id for one in page.failures] == [GLM.id]
+    assert "did not answer in time" in page.failures[0].message
 
 
 def test_a_parked_engine_does_not_hold_the_request_after_the_client_leaves(

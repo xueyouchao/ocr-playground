@@ -7,6 +7,7 @@ the engine read, so what the browser shows is what was parsed.
 """
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, wait
 
@@ -22,13 +23,34 @@ from ..domain.engine import EngineRegistry, EngineSpec
 from ..domain.ports import Cancel, Clock, PageOcr, PageRenderer, PreviewEncoder, Workspace
 from ..domain.reading import PageReading
 from ..domain.errors import UnknownMode
-from .errors import ApplicationError, ClientGone, EngineFailure, EngineUnavailable
+from .errors import (
+    ApplicationError,
+    ClientGone,
+    EngineFailure,
+    EngineTimeout,
+    EngineUnavailable,
+)
 
 _CANCEL_POLL = 0.25
 """How often the wait asks whether the client is still there.
 
 Short enough that closing the tab releases the parse slot promptly, long enough that a comparison
 of four engines does not spend the page spinning on a socket probe.
+"""
+
+
+_COMPARISON_BUDGET = 240.0
+"""How long a comparison may go without *anything* to show.
+
+A single engine keeps the document budget — one engine is the whole page, and waiting is the only way
+to get it. A comparison is different: four rows that all say nothing is not a page, and a cold boot
+longer than four minutes is cheaper to retry than to sit through. Observed boots run 150–450 s.
+"""
+
+_STALL_GRACE = 90.0
+"""Once one row has answered, how long the others get before the page goes out without them.
+
+Enough for a container that is nearly up, short enough that one dead row cannot hold three good ones.
 """
 
 
@@ -196,6 +218,13 @@ class ReadDocumentService:
                 # the token is asked while waiting; the readings are put back in request order below.
                 answers: dict[str, str] = {}
                 waiting = set(running.values())
+                # The watchdog runs on the wall clock, not the injected one: a frozen clock must not be
+                # able to disarm the thing that stops a request from hanging.
+                started = time.monotonic()
+                # A comparison that has produced nothing by now is not going to; one that has something
+                # only gives the stragglers a grace period, so a dead row cannot hold the others.
+                ceiling = started + _COMPARISON_BUDGET if len(engines) > 1 else None
+                answered_at: float | None = None
                 while waiting:
                     waiting = set(wait(waiting, timeout=_CANCEL_POLL).not_done)
                     for engine in pending:
@@ -208,8 +237,23 @@ class ReadDocumentService:
                             raise  # nobody wants this page: stop the document, not a named failure
                         except Exception as error:  # noqa: BLE001 — partial is the point
                             failed[engine_id] = error
+                    now = time.monotonic()
+                    if answers and answered_at is None:
+                        answered_at = now
                     if cancel is not None and cancel():
                         raise ClientGone()
+                    if ceiling is not None and now > ceiling:
+                        break
+                    if answered_at is not None and now - answered_at > _STALL_GRACE:
+                        break
+                # Whatever is still running is reported by name instead of held open: the page shows
+                # the rows that answered and says which ones did not, now rather than in fifteen minutes.
+                for engine in pending:
+                    if engine.spec.id not in answers and engine.spec.id not in failed:
+                        failed[engine.spec.id] = EngineTimeout(
+                            f"{engine.spec.name} did not answer in time — try again; the GPU is "
+                            "booting or busy"
+                        )
                 readings.extend(
                     PageReading.of(engine.spec.id, answers[engine.spec.id])
                     for engine in pending
@@ -220,7 +264,10 @@ class ReadDocumentService:
                 # thread ends when its socket does, and nobody waits for it here.
                 pool.shutdown(wait=False, cancel_futures=True)
                 raise
-            pool.shutdown()
+            if any(not future.done() for future in running.values()):
+                pool.shutdown(wait=False, cancel_futures=True)  # stopped waiting; do not join it
+            else:
+                pool.shutdown()
 
         # An engine that failed stays failed: later pages name the same reason rather than retrying
         # a cold endpoint for every page of the document.
