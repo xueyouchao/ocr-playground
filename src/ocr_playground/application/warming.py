@@ -6,7 +6,12 @@ container to boot and vLLM to come up. That wait cannot be removed, but it does 
 
 It is also where the money is. Modal bills GPU time from boot until `scaledown_window` after the last
 request, so an unthrottled warm on every page view turns a trickle of traffic into a rented GPU. The
-policy bounds exactly that: one warm per interval, and a capped number per rolling day.
+policy bounds exactly that: one warm per engine per interval, and a capped number per rolling day.
+
+Both bounds are keyed by *engine*, not by process. The page warms every parser it has selected, one
+`POST /api/warm` each, and six independent scale-to-zero GPUs share this one process; a single
+process-wide slot boots whichever request wins the race and leaves the other five cold. That is what
+a shared counter did once the picker learned to ask for several parsers at once.
 """
 from __future__ import annotations
 
@@ -36,10 +41,18 @@ class WarmStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class WarmPolicy:
+    """What one engine may spend on being warm.
+
+    `min_interval_seconds` has to fit inside `scaledown_window` (120 s in `deploy/modal/serve_*.py`).
+    An engine that may only be woken after its container has already scaled down is cold and
+    un-warmable at the same time — the cold window this whole path exists to remove. `timeout_seconds`
+    has to outlast the boot it waits for (2-3 minutes), or a successful warm is reported as a failure.
+    """
+
     enabled: bool = True
-    min_interval_seconds: float = 300
+    min_interval_seconds: float = 120
     daily_cap: int = 40
-    timeout_seconds: float = 120
+    timeout_seconds: float = 300
 
 
 def _in_background(job: Callable[[], None]) -> None:
@@ -47,7 +60,12 @@ def _in_background(job: Callable[[], None]) -> None:
 
 
 class EngineWarmer:
-    """Starts a lazy engine booting: once per interval, at most `daily_cap` times in any 24 hours.
+    """Starts a lazy engine booting: one boot per engine per interval, `daily_cap` per engine a day.
+
+    The windows are keyed by mode because the page warms every parser it has selected, one request
+    each, and the six GPUs boot and bill independently. One process-wide slot would hand the boot to
+    whichever request won the race and leave the rest cold — which is what a shared counter did once
+    the picker learned to ask for several parsers at once.
 
     The cap keeps the starts themselves, not a counter, so a start at midnight and a start a second
     before it are both still counted later in the day; a counter that resets at a fixed boundary
@@ -71,8 +89,11 @@ class EngineWarmer:
         self._clock = clock
         self._policy = policy
         self._submit = submit
-        self._last_started: float | None = None
-        self._starts: deque[float] = deque()
+        self._last_started: dict[str, float] = {}
+        self._starts: dict[str, deque[float]] = {}
+        # One page can ping every parser at once, so the window is read and closed under a lock:
+        # without it two requests for the same engine both see a closed window and both boot.
+        self._lock = threading.Lock()
 
     def request(self, mode: str) -> WarmStatus:
         """Decide whether to warm `mode` now, and start it. Never blocks on the endpoint."""
@@ -85,17 +106,20 @@ class EngineWarmer:
         if not isinstance(engine, PreWarmable):
             return WarmStatus.NOT_WARMABLE
 
-        now = self._clock.monotonic()
-        while self._starts and now - self._starts[0] >= ONE_DAY:
-            self._starts.popleft()
-        if len(self._starts) >= self._policy.daily_cap:
-            return WarmStatus.CAPPED
-        if self._last_started is not None and now - self._last_started < self._policy.min_interval_seconds:
-            return WarmStatus.THROTTLED
+        with self._lock:
+            now = self._clock.monotonic()
+            starts = self._starts.setdefault(mode, deque())
+            while starts and now - starts[0] >= ONE_DAY:
+                starts.popleft()
+            if len(starts) >= self._policy.daily_cap:
+                return WarmStatus.CAPPED
+            last = self._last_started.get(mode)
+            if last is not None and now - last < self._policy.min_interval_seconds:
+                return WarmStatus.THROTTLED
+            self._last_started[mode] = now
+            starts.append(now)
 
-        self._last_started = now
-        self._starts.append(now)
-        self._submit(lambda: self._warm(engine))
+        self._submit(lambda: self._warm(engine))  # outside the lock: it starts a thread
         return WarmStatus.STARTED
 
     def _warm(self, engine: PreWarmable) -> None:

@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from fakes import (
+    CHANDRA,
     FAST,
     GLM,
     FakeClock,
@@ -33,6 +34,7 @@ from fakes import (
 from ocr_playground.application.errors import EngineFailure, EngineTimeout, EngineUnavailable
 from ocr_playground.application.warming import EngineWarmer, WarmPolicy
 from ocr_playground.composition.container import Container
+from ocr_playground.domain.engine import EngineRegistry
 from ocr_playground.domain.errors import UnknownMode
 from ocr_playground.infrastructure.process import CommandTimedOut
 from ocr_playground.interfaces.evidence import document_evidence
@@ -292,8 +294,6 @@ def test_a_truncated_upload_is_reported_not_parsed(api) -> None:
 
 
 def test_health_payload_is_built_from_the_registry_and_engines() -> None:
-    from fakes import registry
-
     health = build_health(registry(), {"glm": _Engine(False), "fast": _Engine(True)},
                           max_upload_bytes=10, max_pages=2)
     assert [mode["id"] for mode in health["modes"]] == ["glm", "fast"]
@@ -315,14 +315,21 @@ class _Engine:
 # --- the intent ping -------------------------------------------------------------------
 
 
-def warmer_for(engine, jobs: list, **policy: object) -> EngineWarmer:
+def warmer_over(engines: dict, jobs: list, **policy: object) -> EngineWarmer:
+    """A warmer with one engine per mode — what a page that ticked several parsers asks for."""
     return EngineWarmer(
-        engines={"glm": engine, "fast": FakeEngine(FAST)},
-        registry=registry(),
+        engines=engines,
+        registry=EngineRegistry(
+            {mode: one.spec for mode, one in engines.items()}, default_mode="glm",
+        ),
         clock=FakeClock(),
         policy=WarmPolicy(**policy),  # type: ignore[arg-type]
         submit=jobs.append,
     )
+
+
+def warmer_for(engine, jobs: list, **policy: object) -> EngineWarmer:
+    return warmer_over({"glm": engine, "fast": FakeEngine(FAST)}, jobs, **policy)
 
 
 def test_the_intent_ping_starts_the_gpu(api):
@@ -349,6 +356,26 @@ def test_a_second_ping_inside_the_interval_costs_nothing(api):
 
     assert first == {"warm": "started"}
     assert second == {"warm": "throttled"}
+
+
+def test_a_page_that_ticked_several_parsers_warms_each_one(api):
+    """warmGpu() fires one POST per selected parser; a process-wide slot left the rest cold."""
+    engines = {"chandra": FakeWarmEngine(CHANDRA), "glm": FakeWarmEngine(GLM),
+               "fast": FakeEngine(FAST)}
+    jobs: list = []
+    base, container = api(
+        chandra_base_url="http://127.0.0.1:9/v1",
+        glm_base_url="http://127.0.0.1:9/v1",
+    )
+    container.warmer.override(warmer_over(engines, jobs))
+
+    replies = [
+        json.loads(call(base, "/api/warm", method="POST", headers={"X-Mode": mode})[2])
+        for mode in ("chandra", "glm")  # the two cold parsers; the CPU path is never warmed
+    ]
+
+    assert replies == [{"warm": "started"}, {"warm": "started"}]
+    assert len(jobs) == 2
 
 
 def test_the_intent_ping_can_name_its_mode(api):

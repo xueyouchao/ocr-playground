@@ -1,28 +1,37 @@
 """The pre-warm policy: it buys a cold start back without renting a GPU all day.
 
 Every rule here is about money as much as latency. A warm container bills GPU time from boot until
-`scaledown_window` after the last request, so the tests pin three things: one boot at a time, one per
-interval, and a hard ceiling per day.
+`scaledown_window` after the last request, so the tests pin three things: one boot per engine per
+interval, a hard ceiling per engine per day, and a turn for every parser the page asked for — the
+six GPUs boot independently, so one shared slot would warm only whichever request arrived first.
 """
 from __future__ import annotations
 
 import pytest
 
-from fakes import FAST, GLM, FakeClock, FakeEngine, FakeWarmEngine, registry
+from fakes import CHANDRA, FAST, GLM, FakeClock, FakeEngine, FakeWarmEngine
 from ocr_playground.application.warming import EngineWarmer, WarmPolicy, WarmStatus
+from ocr_playground.domain.engine import EngineRegistry
 from ocr_playground.domain.errors import UnknownMode
 
 
 class Harness:
     """A warmer whose jobs run only when the test asks, so start and finish stay separable."""
 
-    def __init__(self, engine, **policy: object) -> None:
-        self.engine = engine
+    def __init__(self, engine=None, *, engines=None, **policy: object) -> None:
+        """`engines` is one engine per mode — what the page asks for when several parsers are ticked."""
+        self.engines = engines if engines is not None else {
+            "glm": engine, "fast": FakeEngine(FAST),
+        }
+        self.engine = self.engines["glm"]
         self.clock = FakeClock()
         self.jobs: list = []
         self.warmer = EngineWarmer(
-            engines={"glm": engine, "fast": FakeEngine(FAST)},
-            registry=registry(),
+            engines=self.engines,
+            registry=EngineRegistry(
+                {mode: one.spec for mode, one in self.engines.items()},
+                default_mode=next(iter(self.engines)),
+            ),
             clock=self.clock,
             policy=WarmPolicy(**policy),  # type: ignore[arg-type]
             submit=self.jobs.append,
@@ -65,7 +74,42 @@ def test_the_first_request_starts_exactly_one_boot():
     assert len(harness.jobs) == 1
     assert engine.warm_calls == []  # the decision does not block on the endpoint
     harness.run()
-    assert engine.warm_calls == [120.0]
+    assert engine.warm_calls == [WarmPolicy().timeout_seconds]
+
+
+def test_every_parser_the_page_asked_for_gets_its_own_boot():
+    """The page pings each ticked parser; one process-wide slot warmed only whichever arrived first."""
+    glm, chandra = FakeWarmEngine(GLM), FakeWarmEngine(CHANDRA)
+    harness = Harness(engines={"glm": glm, "chandra": chandra, "fast": FakeEngine(FAST)})
+
+    assert harness.warmer.request("chandra") == WarmStatus.STARTED
+    assert harness.warmer.request("glm") == WarmStatus.STARTED
+
+    harness.run()
+    assert len(chandra.warm_calls) == 1
+    assert len(glm.warm_calls) == 1
+
+
+def test_one_engine_is_still_one_boot_per_interval():
+    harness = Harness(FakeWarmEngine(GLM), min_interval_seconds=120)
+    harness.warmer.request("glm")
+    harness.clock.now += 119
+    assert harness.warmer.request("glm") == WarmStatus.THROTTLED
+    harness.clock.now += 1
+    assert harness.warmer.request("glm") == WarmStatus.STARTED
+
+
+def test_the_daily_ceiling_is_per_engine_too():
+    """Six parsers share one deployment, not one budget: one parser's day cannot cap another's."""
+    harness = Harness(
+        engines={"glm": FakeWarmEngine(GLM), "chandra": FakeWarmEngine(CHANDRA),
+                 "fast": FakeEngine(FAST)},
+        min_interval_seconds=0,
+        daily_cap=1,
+    )
+    assert harness.warmer.request("glm") == WarmStatus.STARTED
+    assert harness.warmer.request("glm") == WarmStatus.CAPPED
+    assert harness.warmer.request("chandra") == WarmStatus.STARTED
 
 
 def test_a_second_request_inside_the_interval_is_throttled():

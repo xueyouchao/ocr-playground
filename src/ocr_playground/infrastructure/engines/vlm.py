@@ -136,7 +136,7 @@ class VlmEngine:
             f"{self.spec.id} model={self._model} prompt={self._prompt!r} endpoint={self._base_url}"
         )
 
-    def warm(self, timeout: float = 120) -> bool:
+    def warm(self, timeout: float = 300) -> bool:
         """Ask a scale-to-zero endpoint to boot, without generating anything.
 
         `GET /models` is the cheapest thing each wrapper answers. Against a cold container the

@@ -5,6 +5,9 @@ collaborators. These tests hold it to that.
 """
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 from fakes import (
     FAST,
     GLM,
@@ -20,6 +23,8 @@ from ocr_playground.composition.container import Container, build_container
 from ocr_playground.domain.ports import PreWarmable
 from ocr_playground.domain.document import PageLimit, SourceDocument
 from ocr_playground.infrastructure.settings import Settings
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_defaults_resolve_without_bootstrapping() -> None:
@@ -174,13 +179,30 @@ def test_the_warm_policy_comes_from_configuration() -> None:
 
 
 def test_warming_is_throttled_by_default_and_can_be_switched_off() -> None:
-    assert Container().warm_policy().min_interval_seconds == 300
+    assert Container().warm_policy().min_interval_seconds == 120
     assert Container().warm_policy().daily_cap == 40
 
     off = build_container({"GLM_OCR_WARM": "0", "GLM_OCR_WARM_DAILY_CAP": "3"})
     assert off.settings().warm_enabled is False
     assert off.settings().warm_daily_cap == 3
     assert off.warmer().request("glm") == WarmStatus.DISABLED
+
+
+def test_the_warm_interval_fits_inside_the_warm_window() -> None:
+    """An engine that may only be woken after it scaled down is cold and un-warmable at once.
+
+    The warm window is `scaledown_window` in each Modal app: the GPU stays up that long after the
+    last request. Waiting longer than that to allow the next warm hands the visitor the cold start
+    the path exists to remove — which is how 300 s of throttle against a 120 s window behaved.
+    """
+    windows: list[int] = []
+    for app in sorted((ROOT / "deploy" / "modal").glob("serve_*.py")):
+        declared = re.search(r"scaledown_window=(\d+)", app.read_text())
+        if declared:
+            windows.append(int(declared.group(1)))
+
+    assert len(windows) == 6, "the six GPU apps each declare their warm window"
+    assert Container().warm_policy().min_interval_seconds <= min(windows)
 
 
 def test_only_the_remote_engine_can_be_warmed() -> None:
