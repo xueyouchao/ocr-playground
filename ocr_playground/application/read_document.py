@@ -71,16 +71,18 @@ class ReadDocumentService:
         return engine
 
     def _unavailable_message(self, mode: str, spec: EngineSpec) -> str:
-        # Prefer a different *kind* of engine: a GPU parser that is not configured should point at
-        # the CPU path, which is ready, rather than at another GPU that may be just as cold.
+        # An unavailable parser should point at one that is ready now: the path running on this host
+        # answers in seconds, while another GPU may be just as cold or missing. Rank by *where* it
+        # runs — `device` — not by `kind`, which says how a page is read; ranking by kind sends a
+        # missing MinerU to a cold GLM once both are no longer the same kind.
         runnable = [
             candidate for candidate in self.registry.modes
             if candidate != mode and self._engines[candidate].available
         ]
-        alternative = next(
-            (candidate for candidate in runnable
-             if self.registry.spec(candidate).kind != spec.kind),
-            runnable[0] if runnable else None,
+        alternative = (
+            next((c for c in runnable if self.registry.spec(c).device.startswith("native")), None)
+            or next((c for c in runnable if self.registry.spec(c).kind != spec.kind), None)
+            or (runnable[0] if runnable else None)
         )
         if alternative is None:
             return f"{spec.name} is not configured on this server"

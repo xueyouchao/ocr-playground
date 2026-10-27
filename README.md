@@ -54,6 +54,12 @@ pass. Hence this shootout: what do the parsers that actually look at the pixels 
 Each was run the way its project intends: native CLI or API, default prompts from the model cards, and
 `records/<id>.json` holds the raw output verbatim.
 
+Every card carries two chips. The first says where it runs — `native` on this host's CPU, or `remote`
+on a Modal L4 — and the second says how it reads a page: `vlm` (one vision-language model, one pass,
+markdown out), `staged` (separate layout, OCR and table models in sequence, which is PP-StructureV3 at
+either size), or `hybrid` (MinerU: a VLM with a staged pipeline behind it as the fallback). The two are
+independent — PP-StructureV3 is `staged` on CPU and `staged` on GPU alike.
+
 ## Run it
 
 ```bash
