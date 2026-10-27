@@ -112,12 +112,18 @@ def run_page(pdf: bytes, number: int, backend: str) -> str:
 @app.local_entrypoint()
 def main(backend: str = "vlm-auto-engine", pdf: str = ""):
     import json
+    import sys
     from pathlib import Path
 
-    default_pdf = Path(__file__).resolve().parents[1] / "corpus" / "document.pdf"
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from ocr_playground.interfaces.site.layout import data
+
+    default_pdf = data(root) / "corpus" / "document.pdf"
     source = Path(pdf) if pdf else default_pdf
     results = parse.remote(source.read_bytes(), backend)
 
-    target = Path(__file__).resolve().parents[1] / "records" / "mineru-gpu.json"
+    target = data(root) / "records" / "mineru-gpu.json"
     target.write_text(json.dumps(results, indent=1, ensure_ascii=False), encoding="utf-8")
     print(f"{target}: {sum(len(v) for v in results.values()):,} chars over {len(results)} pages")

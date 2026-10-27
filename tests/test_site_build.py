@@ -229,3 +229,11 @@ def test_a_refused_storage_write_cannot_freeze_the_toggle() -> None:
     # same theme again.
     assert "chosenTheme" in body, "the current theme must not be read back from storage"
     assert "localStorage" not in body
+
+
+def test_every_record_writer_agrees_with_the_build() -> None:
+    """One module names the layout: a runner writing elsewhere would publish stale runs silently."""
+    from ocr_playground.interfaces.site.layout import data
+    from runners._common import RECORDS
+
+    assert RECORDS == data(ROOT) / "records"
