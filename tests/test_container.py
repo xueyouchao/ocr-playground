@@ -76,7 +76,9 @@ def test_the_registry_is_derived_from_the_wired_engines() -> None:
     container = build_container({"GLM_OCR_BASE_URL": "https://gpu.example/v1"})
     registry_ = container.registry()
 
-    assert registry_.modes == ("glm", "fast", "chandra", "nemotron", "unlimited", "mineru")
+    assert registry_.modes == (
+        "glm", "fast", "chandra", "nemotron", "unlimited", "mineru", "paddle",
+    )
     assert registry_.spec("glm").id == "glm-ocr"
     assert registry_.spec("glm").name == "GLM-OCR"
     assert registry_.default_mode == "glm"
@@ -89,17 +91,19 @@ def test_each_vlm_endpoint_is_its_own_mode() -> None:
         "NEMOTRON_PARSE_BASE_URL": "https://nemotron.example/v1",
         "UNLIMITED_OCR_BASE_URL": "https://unlimited.example/v1",
         "MINERU_BASE_URL": "https://mineru.example/v1",
+        "PADDLE_OCR_BASE_URL": "https://paddle.example/v1",
     })
     engines = container.engines()
 
     assert {mode: engine.available for mode, engine in engines.items()} == {
         "glm": True, "fast": True, "chandra": True, "nemotron": True, "unlimited": True,
-        "mineru": True,
+        "mineru": True, "paddle": True,
     }
     assert engines["chandra"].spec.id == "chandra-2"
     assert engines["nemotron"].spec.id == "nemotron-parse"
     assert engines["unlimited"].spec.id == "unlimited-ocr"
     assert engines["mineru"].spec.id == "mineru-gpu"
+    assert engines["paddle"].spec.id == "paddleocr-gpu"
     # The fast path never needs an endpoint, and the GPU modes never run without one.
     assert build_container({}).engines()["chandra"].available is False
 
