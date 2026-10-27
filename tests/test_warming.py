@@ -7,6 +7,8 @@ six GPUs boot independently, so one shared slot would warm only whichever reques
 """
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from fakes import CHANDRA, FAST, GLM, FakeClock, FakeEngine, FakeWarmEngine
@@ -15,16 +17,33 @@ from ocr_playground.domain.engine import EngineRegistry
 from ocr_playground.domain.errors import UnknownMode
 
 
+class GatedClock:
+    """A clock that parks its first caller *inside* the window, so a test can hold it open."""
+
+    def __init__(self, now: float = 1000.0) -> None:
+        self.now = now
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self._calls = 0
+
+    def monotonic(self) -> float:
+        self._calls += 1
+        if self._calls == 1:
+            self.entered.set()
+            assert self.release.wait(5), "the test never released the window"
+        return self.now
+
+
 class Harness:
     """A warmer whose jobs run only when the test asks, so start and finish stay separable."""
 
-    def __init__(self, engine=None, *, engines=None, **policy: object) -> None:
+    def __init__(self, engine=None, *, engines=None, clock=None, **policy: object) -> None:
         """`engines` is one engine per mode — what the page asks for when several parsers are ticked."""
         self.engines = engines if engines is not None else {
             "glm": engine, "fast": FakeEngine(FAST),
         }
         self.engine = self.engines["glm"]
-        self.clock = FakeClock()
+        self.clock = clock if clock is not None else FakeClock()
         self.jobs: list = []
         self.warmer = EngineWarmer(
             engines=self.engines,
@@ -97,6 +116,44 @@ def test_one_engine_is_still_one_boot_per_interval():
     assert harness.warmer.request("glm") == WarmStatus.THROTTLED
     harness.clock.now += 1
     assert harness.warmer.request("glm") == WarmStatus.STARTED
+
+
+def test_two_requests_for_the_same_engine_are_serialised():
+    """A lock, not luck: two tabs opened together warm the same parser, and only one may boot.
+
+    The first request is parked inside the window while the second arrives. Without the lock the
+    second would read the window as still open and start a second boot; with it, it waits and is then
+    throttled by the window the first one closed.
+    """
+    clock = GatedClock()
+    harness = Harness(FakeWarmEngine(GLM), clock=clock)
+    outcomes: dict[str, WarmStatus] = {}
+
+    first = threading.Thread(target=lambda: outcomes.update(
+        first=harness.warmer.request("glm")))
+    first.start()
+    assert clock.entered.wait(5), "the first request never reached the window"
+
+    competing = threading.Event()
+
+    def second_request() -> None:
+        competing.set()
+        outcomes["second"] = harness.warmer.request("glm")
+
+    second = threading.Thread(target=second_request)
+    second.start()
+    assert competing.wait(5), "the second request never started"
+    try:
+        second.join(0.25)  # it must be waiting on the lock, not deciding from a window left open
+        assert second.is_alive(), "the second request read the window while the first held it"
+        assert harness.jobs == [], "nothing may be submitted until the window is closed"
+    finally:
+        clock.release.set()  # never leave a thread parked, even when the assertion above fails
+        first.join(5)
+        second.join(5)
+
+    assert outcomes == {"first": WarmStatus.STARTED, "second": WarmStatus.THROTTLED}
+    assert len(harness.jobs) == 1
 
 
 def test_the_daily_ceiling_is_per_engine_too():
