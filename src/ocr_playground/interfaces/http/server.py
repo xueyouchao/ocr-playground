@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import select
+import socket
 import sys
 import time
 import urllib.parse
@@ -23,7 +25,12 @@ from urllib.parse import unquote
 
 from ...application.capacity import SlotsBusy
 from ...application.read_document import reading_note
-from ...application.errors import EngineFailure, EngineTimeout, EngineUnavailable
+from ...application.errors import (
+    ClientGone,
+    EngineFailure,
+    EngineTimeout,
+    EngineUnavailable,
+)
 from ...composition.container import Container, build_container
 from ...domain.document import SourceDocument
 from ...domain.errors import DomainError
@@ -39,6 +46,9 @@ def failure_response(error: BaseException) -> tuple[HTTPStatus, str]:
     An unexpected exception is still an unreadable file from the client's point of view, so it keeps
     the wording the page has always shown rather than a bare "internal error".
     """
+    if isinstance(error, ClientGone):
+        # Nothing was left to answer to; a proxy that does see this should not retry the upload.
+        return HTTPStatus.REQUEST_TIMEOUT, "the client closed the request"
     if isinstance(error, CommandTimedOut):
         return HTTPStatus.GATEWAY_TIMEOUT, "parsing took too long"
     if isinstance(error, EngineUnavailable):
@@ -70,6 +80,26 @@ class Handler(BaseHTTPRequestHandler):
     # socket timeout bounds the read, and the parse slot is taken *before* the read so stalled
     # uploads queue behind the same two-slot bound as real work.
     timeout = 30
+
+    def client_is_gone(self) -> bool:
+        """Has the browser closed the connection while we were working?
+
+        A parse can hold a request for minutes waiting on a cold GPU, and the page gives up long
+        before that. The socket says so first: readable with nothing to read is EOF. Cheap enough to
+        ask between engines and between pages.
+        """
+        try:
+            readable, _, _ = select.select([self.connection], [], [], 0)
+        except (OSError, ValueError):
+            return True
+        if not readable:
+            return False
+        try:
+            return self.connection.recv(1, socket.MSG_PEEK) == b""
+        except (BlockingIOError, InterruptedError):
+            return False
+        except OSError:
+            return True
 
     @property
     def container(self) -> Container:
@@ -237,10 +267,16 @@ class Handler(BaseHTTPRequestHandler):
                 service = self.container.read_document()
                 engines = [service.require_mode(part) for part in mode.split(",")]
                 document = service.execute(
-                    SourceDocument.accepted(payload, media_type, name), mode,
+                    SourceDocument.accepted(payload, media_type, name), mode, cancel=self.client_is_gone,
                     note=f"uploaded just now · {reading_note(engines)}",
                 )
                 evidence = document_evidence(document)
+        except ClientGone:
+            # The tab was closed: answering would only write into a socket that is already gone, and
+            # the engines have stopped, so the slot is released here rather than minutes later.
+            sys.stderr.write("the client hung up; the parse was abandoned\n")
+            self.close_connection = True
+            return
         except SlotsBusy:
             self._json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "busy, try again in a moment"})
             return

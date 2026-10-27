@@ -19,10 +19,10 @@ from ..domain.document import (
     SourceDocument,
 )
 from ..domain.engine import EngineRegistry, EngineSpec
-from ..domain.ports import Clock, PageOcr, PageRenderer, PreviewEncoder, Workspace
+from ..domain.ports import Cancel, Clock, PageOcr, PageRenderer, PreviewEncoder, Workspace
 from ..domain.reading import PageReading
 from ..domain.errors import UnknownMode
-from .errors import ApplicationError, EngineFailure, EngineUnavailable
+from .errors import ApplicationError, ClientGone, EngineFailure, EngineUnavailable
 
 
 def reading_note(engines: Sequence[PageOcr]) -> str:
@@ -100,6 +100,7 @@ class ReadDocumentService:
         previews: bool | None = None,
         note: str | None = None,
         limit: PageLimit | None = None,
+        cancel: Cancel | None = None,
     ) -> ReadDocument:
         """Read `source` with one mode, or with several at once to compare them.
 
@@ -110,6 +111,9 @@ class ReadDocumentService:
 
         One engine failing does not sink the comparison — the pages record what answered and name
         what did not. Only a document that produced no reading at all is an error.
+
+        `cancel` is asked before each page and handed to every engine: a client that hung up stops the
+        document before the next page, and a parked engine stops waiting instead of holding the slot.
         """
         requested = self._requested(modes)
         engines = [self.require_mode(mode) for mode in requested]
@@ -125,7 +129,9 @@ class ReadDocumentService:
         with self._workspace.create() as scratch:
             images = self._renderer.render(source, scratch, page_limit)
             for image in images:
-                readings, failures = self._read_page(engines, image, budgets, failed)
+                if cancel is not None and cancel():
+                    raise ClientGone()
+                readings, failures = self._read_page(engines, image, budgets, failed, cancel)
                 preview = self._preview_encoder.encode(image) if with_previews else None
                 pages.append(DocumentPage(
                     number=image.number,
@@ -162,23 +168,35 @@ class ReadDocumentService:
         image: PageImage,
         budgets: dict[str, float],
         failed: dict[str, Exception],
+        cancel: Cancel | None = None,
     ) -> tuple[list[PageReading], list[PageFailure]]:
         """Read one page with every engine that is still working, and keep the ones that answer."""
         pending = [engine for engine in engines if engine.spec.id not in failed]
         readings: list[PageReading] = []
         if pending:
-            with ThreadPoolExecutor(max_workers=len(pending)) as pool:
+            pool = ThreadPoolExecutor(max_workers=len(pending))
+            try:
                 running = {
-                    engine.spec.id: pool.submit(engine.read, image, budgets[engine.spec.id])
+                    engine.spec.id: pool.submit(
+                        engine.read, image, budgets[engine.spec.id], cancel
+                    )
                     for engine in pending
                 }
                 for engine in pending:
                     try:
                         text = running[engine.spec.id].result()
+                    except ClientGone:
+                        raise  # nobody wants this page: stop the document, do not name a failure
                     except Exception as error:  # noqa: BLE001 — see the docstring: partial is the point
                         failed[engine.spec.id] = error
                     else:
                         readings.append(PageReading.of(engine.spec.id, text))
+            except BaseException:
+                # A parked engine must not hold the request open after the client has gone; its own
+                # thread ends when its socket does, and nobody waits for it here.
+                pool.shutdown(wait=False, cancel_futures=True)
+                raise
+            pool.shutdown()
 
         # An engine that failed stays failed: later pages name the same reason rather than retrying
         # a cold endpoint for every page of the document.

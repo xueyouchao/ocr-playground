@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from ocr_playground.application.errors import EngineFailure, EngineTimeout
+from ocr_playground.application.errors import ClientGone, EngineFailure, EngineTimeout
 from ocr_playground.domain.document import PageImage
 from ocr_playground.infrastructure.engines import GLM_SPEC, VlmEngine, vlm
 from ocr_playground.infrastructure.engines.vlm import MAX_UPLOADS
@@ -256,6 +256,25 @@ def test_a_flapping_endpoint_is_not_handed_the_page_forever(endpoint, tmp_path) 
     assert len(stub.dropped) == MAX_UPLOADS, "the page is offered exactly MAX_UPLOADS times"
     assert len(stub.requests) == MAX_UPLOADS, "one kilobyte probe per attempt, then it stops"
     assert all(not request["body"].get("messages") for request in stub.requests)
+
+
+def test_a_cancelled_read_stops_walking_the_handoffs(endpoint, tmp_path) -> None:
+    """The tab was closed while the engine was still handing off. Stop asking, and put the page on the
+    wire no more than the once it already cost — the point is to stop paying, not to finish."""
+    checks = {"n": 0}
+
+    def cancel() -> bool:
+        checks["n"] += 1
+        return checks["n"] > 3
+
+    stub, engine = endpoint(lambda path, body: (303, {"Location": "/cold"}, b""))
+
+    with pytest.raises(ClientGone):
+        engine.read(page(tmp_path, b"png" + b"\0" * 4096), time.monotonic() + 30, cancel)
+
+    assert checks["n"] > 3, "the token was never asked"
+    assert len(stub.requests) < 8, "it walked on instead of stopping"
+    assert sum(1 for request in stub.requests if request["body"].get("messages")) == 1
 
 
 def test_an_http_error_is_a_bad_gateway(endpoint, tmp_path) -> None:

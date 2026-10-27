@@ -213,3 +213,16 @@ def test_only_the_remote_engine_can_be_warmed() -> None:
 
 def test_a_host_with_no_endpoint_reports_the_gpu_as_unavailable() -> None:
     assert Container().warmer().request("glm") == WarmStatus.UNAVAILABLE
+
+
+def test_every_modal_app_is_capped_at_one_container() -> None:
+    """One upload asks each engine exactly once, and a client that gives up asks again.
+
+    A second concurrent request otherwise buys a second copy of a model that is already loading on the
+    GPU — the playground got two mineru containers that way, both of them booting for uploads the
+    browser had already abandoned. The cap makes the retry queue instead.
+    """
+    apps = sorted((ROOT / "deploy" / "modal").glob("serve_*.py"))
+    assert len(apps) == 6, "one file per engine"
+    uncapped = [app.name for app in apps if not re.search(r"max_containers\s*=\s*1", app.read_text())]
+    assert uncapped == [], f"these apps can be cloned by a retry: {uncapped}"

@@ -31,7 +31,12 @@ from fakes import (
     registry,
     sample_document,
 )
-from ocr_playground.application.errors import EngineFailure, EngineTimeout, EngineUnavailable
+from ocr_playground.application.errors import (
+    ClientGone,
+    EngineFailure,
+    EngineTimeout,
+    EngineUnavailable,
+)
 from ocr_playground.application.warming import EngineWarmer, WarmPolicy
 from ocr_playground.composition.container import Container
 from ocr_playground.domain.engine import EngineRegistry
@@ -511,3 +516,41 @@ def test_a_comparison_with_one_unconfigured_engine_is_refused(api):
     })
     assert status == 503
     assert "Chandra OCR 2" in payload(body)["error"]
+
+
+class HangingService:
+    """A use case that hangs the way a cold GPU does, and records whether it was told to stop."""
+
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.cancelled = threading.Event()
+        self._stub = StubService()
+
+    def require_mode(self, mode: str):
+        return self._stub.require_mode(mode)
+
+    def execute(self, source, mode, *, cancel=None, **kwargs):
+        self.started.set()
+        while not (cancel and cancel()):
+            time.sleep(0.01)
+        self.cancelled.set()
+        raise ClientGone()
+
+
+def test_a_client_that_hangs_up_stops_the_parse(api) -> None:
+    """A parse can hold its thread for minutes waiting on a boot. If the tab is closed the work must
+    stop then and there, not run to the budget and answer into a socket that is already gone."""
+    service = HangingService()
+    base, _ = api(service=service)
+    host, port = base.removeprefix("http://").split(":")
+    body = b"\x89PNG" + b"x" * 64
+    head = (
+        f"POST /api/parse HTTP/1.1\r\nHost: {host}\r\nX-Mode: fast\r\n"
+        f"Content-Type: image/png\r\nContent-Length: {len(body)}\r\n\r\n"
+    ).encode()
+
+    with socket.create_connection((host, int(port)), timeout=5) as client:
+        client.sendall(head + body)
+        assert service.started.wait(5), "the parse never started"
+    # leaving the block closed the socket, which is exactly what closing the tab does
+    assert service.cancelled.wait(5), "the parse kept running after the client hung up"

@@ -6,13 +6,22 @@ plugged in.
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from .document import PageImage, PageLimit, SourceDocument
 from .engine import EngineSpec
+
+Cancel = Callable[[], bool]
+"""True once nobody is waiting for this reading any more — the browser closed the connection.
+
+Polled where abandoning the work is still free: before a page, before an upload, between attempts.
+It cannot interrupt a request already on the wire, so an engine treats it as a checkpoint rather
+than an abort, and a read that notices it raises `ClientGone` instead of returning text nobody
+will read.
+"""
 
 
 class Workspace(Protocol):
@@ -48,8 +57,14 @@ class PageOcr(Protocol):
     def identity(self) -> str:
         """Everything that changes what it emits, for the indexer's memo key."""
 
-    def read(self, page: PageImage, deadline: float | None) -> str:
-        """The page's text. `deadline` is the monotonic time the document must finish by."""
+    def read(
+        self, page: PageImage, deadline: float | None, cancel: Cancel | None = None
+    ) -> str:
+        """The page's text. `deadline` is the monotonic time the document must finish by.
+
+        `cancel` is asked at each point where stopping costs nothing; a parked engine that sees it
+        raises `ClientGone` so the caller can stop paying for a page nobody is waiting for.
+        """
 
 
 @runtime_checkable

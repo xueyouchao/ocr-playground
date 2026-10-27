@@ -5,11 +5,18 @@ the indexer both depend on.
 """
 from __future__ import annotations
 
+import time
+
 import pytest
 
-from fakes import build_rig
-from ocr_playground.application.errors import EngineFailure, EngineTimeout, EngineUnavailable
-from ocr_playground.domain.document import PageLimit, SourceDocument
+from fakes import GLM, FakeEngine, build_rig
+from ocr_playground.application.errors import (
+    ClientGone,
+    EngineFailure,
+    EngineTimeout,
+    EngineUnavailable,
+)
+from ocr_playground.domain.document import PageImage, PageLimit, SourceDocument
 from ocr_playground.domain.errors import UnknownMode
 from ocr_playground.interfaces.evidence import document_evidence
 
@@ -222,3 +229,48 @@ def test_a_mode_list_is_deduplicated_and_order_preserved(tmp_path, png_bytes) ->
     rig = build_rig(tmp_path, pages=1)
     document = rig.service.execute(source(png_bytes), " fast , glm , fast ")
     assert [engine.id for engine in document.engines] == ["liteparse-tesseract", "glm-ocr"]
+
+
+# --- a client that hung up ------------------------------------------------------------
+
+
+def test_a_client_that_hangs_up_is_not_a_pane_failure(tmp_path, png_bytes) -> None:
+    """The page was closed; there is nobody to read the answer, so it must not be reported as a row
+    that failed. `ClientGone` leaves the fan-out instead of landing in the document."""
+    rig = build_rig(tmp_path, pages=1)
+    rig.service._engines["glm"] = FakeEngine(GLM, error=ClientGone())  # type: ignore[index]
+
+    with pytest.raises(ClientGone):
+        rig.service.execute(source(png_bytes), "glm,fast")
+
+
+class Parked:
+    """A row waiting on a cold container: nothing comes back until the token says nobody cares."""
+
+    spec = GLM
+    available = True
+
+    def identity(self) -> str:
+        return "parked"
+
+    def read(self, page: PageImage, deadline: float | None, cancel=None) -> str:
+        while not (cancel and cancel()):
+            time.sleep(0.01)
+        raise ClientGone()
+
+
+def test_a_parked_engine_does_not_hold_the_request_after_the_client_leaves(
+    tmp_path, png_bytes
+) -> None:
+    """The parked row is what made a dead comparison hang for the whole budget. Once the client is
+    gone the document stops, and nothing waits for the engine that was still parked."""
+    started = time.monotonic()
+    rig = build_rig(tmp_path, pages=1)
+    rig.service._engines["glm"] = Parked()  # type: ignore[index]
+
+    def client_left() -> bool:
+        return time.monotonic() - started > 0.3
+
+    with pytest.raises(ClientGone):
+        rig.service.execute(source(png_bytes), "glm,fast", cancel=client_left)
+    assert time.monotonic() - started < 2, "the request outlived the client by more than the poll"
