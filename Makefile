@@ -5,7 +5,8 @@
 #
 # Where things live: `data/` is what a run produced (the scan, the roster, the records), `site/` is
 # what the build publishes (template, page images, and the two files it generates), `scripts/` holds
-# the entry points. `ocr_playground/interfaces/site/layout.py` is the single place that names them.
+# the entry points, `src/` the package itself. `src/ocr_playground/interfaces/site/layout.py` is the
+# single place that names the two directories.
 PY        ?= python3
 VENV      ?= .venv
 VENV_PY   ?= $(VENV)/bin/python

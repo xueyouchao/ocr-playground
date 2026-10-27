@@ -11,7 +11,8 @@ WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt liteparse==2.17.0
 
-COPY ocr_playground /app/ocr_playground
+COPY src /app/src
+ENV PYTHONPATH=/app/src
 COPY api/server.py /app/api/server.py
 
 EXPOSE 8090
