@@ -396,7 +396,7 @@ def test_health_says_what_the_warm_budget_is(api):
     budget = health["warm"]
     assert budget["enabled"] is True
     assert budget["engines"]["glm"] == {
-        "used_today": 0, "daily_cap": 40, "interval_seconds": 90, "next_warm_in": 90,
+        "used_today": 0, "daily_cap": 100, "interval_seconds": 90, "next_warm_in": 90,
     }
     assert "fast" not in budget["engines"], "a native parser has no GPU to keep warm"
 

@@ -181,7 +181,7 @@ def test_the_warm_policy_comes_from_configuration() -> None:
 
 def test_warming_is_throttled_by_default_and_can_be_switched_off() -> None:
     assert Container().warm_policy().min_interval_seconds == 90
-    assert Container().warm_policy().daily_cap == 40
+    assert Container().warm_policy().daily_cap == 100
 
     off = build_container({"GLM_OCR_WARM": "0", "GLM_OCR_WARM_DAILY_CAP": "3"})
     assert off.settings().warm_enabled is False

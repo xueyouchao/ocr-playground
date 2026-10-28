@@ -62,7 +62,7 @@ class Settings:
     # logged as a failure.
     warm_enabled: bool = True
     warm_min_interval_seconds: int = 90
-    warm_daily_cap: int = 40
+    warm_daily_cap: int = 100
     warm_timeout_seconds: int = 300
 
     @classmethod
@@ -85,7 +85,7 @@ class Settings:
             warm_enabled=values.get("GLM_OCR_WARM", "1").strip().lower()
             not in ("0", "false", "no", "off"),
             warm_min_interval_seconds=int(values.get("GLM_OCR_WARM_INTERVAL", "90")),
-            warm_daily_cap=int(values.get("GLM_OCR_WARM_DAILY_CAP", "40")),
+            warm_daily_cap=int(values.get("GLM_OCR_WARM_DAILY_CAP", "100")),
             warm_timeout_seconds=int(values.get("GLM_OCR_WARM_TIMEOUT", "300")),
         )
 

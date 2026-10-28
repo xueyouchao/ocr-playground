@@ -125,10 +125,12 @@ takes the time of the slowest.
 picks a parser or reaches for the uploader, so the boot overlaps with the seconds they spend choosing
 a file — one request per selected parser, because each of the six GPUs boots on its own. A warm
 container bills GPU time from boot until `scaledown_window` after the last request, so the server
-throttles each engine on its own window: at most one boot per `GLM_OCR_WARM_INTERVAL` (120 s, the
-`scaledown_window` the apps declare) and `GLM_OCR_WARM_DAILY_CAP` (40) per engine per rolling day;
+throttles each engine on its own window: at most one boot per `GLM_OCR_WARM_INTERVAL` (90 s, inside the
+`scaledown_window` the apps declare — equal is a tie, and a tie is a coin flip) and
+`GLM_OCR_WARM_DAILY_CAP` (100) per engine per rolling day;
 `GLM_OCR_WARM=0` turns it off and `GLM_OCR_WARM_TIMEOUT` bounds the wait. It is deliberately not on
-`GET /api/health`: warming every page view would rent a GPU for a trickle of traffic.
+`GET /api/health` as a side effect, but its *budget* is reported there — warms used, the cap and how
+long until the next one — because "is the warm path working" should be one request.
 
 In production the service runs as its own container behind the same Traefik router
 (`deploy/README.md`), which is why the page calls `/api/parse` on its own origin.

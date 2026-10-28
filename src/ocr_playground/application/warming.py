@@ -54,7 +54,7 @@ class WarmPolicy:
 
     enabled: bool = True
     min_interval_seconds: float = 90
-    daily_cap: int = 40
+    daily_cap: int = 100
     timeout_seconds: float = 300
 
 
@@ -69,6 +69,10 @@ class EngineWarmer:
     each, and the six GPUs boot and bill independently. One process-wide slot would hand the boot to
     whichever request won the race and leave the rest cold — which is what a shared counter did once
     the picker learned to ask for several parsers at once.
+
+    The cap is the only daily bound on a public, unauthenticated endpoint: the interval limits the
+    rate, but anything that keeps pinging would rent six GPUs indefinitely. It is set well above what
+    normal use reaches, so it guards the bill without turning into a silent "warming stopped working".
 
     The cap keeps the starts themselves, not a counter, so a start at midnight and a start a second
     before it are both still counted later in the day; a counter that resets at a fixed boundary
