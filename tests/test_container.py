@@ -254,6 +254,45 @@ def test_the_warm_budget_can_be_read_without_spending_it() -> None:
     assert warmer.request("glm") == WarmStatus.CAPPED
 
 
+def test_a_zero_cap_is_a_refusal_not_a_crash() -> None:
+    """`GLM_OCR_WARM_DAILY_CAP=0` switches warming off through the budget; it may not raise."""
+    warmer = EngineWarmer(
+        engines={"glm": FakeWarmEngine(GLM)},
+        registry=registry(),
+        clock=FakeClock(),
+        policy=WarmPolicy(min_interval_seconds=90, daily_cap=0),
+        submit=lambda job: None,
+    )
+
+    assert warmer.request("glm") == WarmStatus.CAPPED
+    budget = warmer.report()["glm"]
+    assert budget["next_warm"] == "capped"
+    assert budget["next_warm_in"] is None, "no wait helps when the cap is zero"
+
+
+def test_the_budget_says_what_a_request_would_say() -> None:
+    """The report is a promise about `request()`: off and unavailable are not `started`."""
+    off = EngineWarmer(
+        engines={"glm": FakeWarmEngine(GLM)},
+        registry=registry(),
+        clock=FakeClock(),
+        policy=WarmPolicy(enabled=False),
+        submit=lambda job: None,
+    )
+    assert off.report()["glm"]["next_warm"] == "disabled"
+    assert off.report()["glm"]["next_warm_in"] is None
+
+    cold = EngineWarmer(
+        engines={"glm": FakeWarmEngine(GLM, available=False)},
+        registry=registry(),
+        clock=FakeClock(),
+        policy=WarmPolicy(),
+        submit=lambda job: None,
+    )
+    assert cold.report()["glm"]["next_warm"] == "unavailable"
+    assert cold.report()["glm"]["next_warm_in"] is None
+
+
 def test_only_the_remote_engine_can_be_warmed() -> None:
     container = build_container({"GLM_OCR_BASE_URL": "https://gpu.example/v1"})
     assert isinstance(container.engines()["glm"], PreWarmable)

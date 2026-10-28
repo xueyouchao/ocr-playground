@@ -105,12 +105,7 @@ class EngineWarmer:
     def request(self, mode: str) -> WarmStatus:
         """Decide whether to warm `mode` now, and start it. Never blocks on the endpoint."""
         self._registry.spec(mode)  # an unknown mode is the client's error, before any side effect
-        if not self._policy.enabled:
-            return WarmStatus.DISABLED
-        engine = self._engines[mode]
-        if not engine.available:
-            return WarmStatus.UNAVAILABLE
-        if not isinstance(engine, PreWarmable):
+        if not isinstance(self._engines[mode], PreWarmable):
             return WarmStatus.NOT_WARMABLE
 
         with self._lock:
@@ -118,14 +113,32 @@ class EngineWarmer:
             starts = self._starts.setdefault(mode, deque())
             while starts and now - starts[0] >= ONE_DAY:
                 starts.popleft()
-            blocked, _ = self._wait(now, starts, self._last_started.get(mode))
-            if blocked is not None:
-                return blocked
+            status, _ = self._status(mode, now, starts, self._last_started.get(mode))
+            if status is not WarmStatus.STARTED:
+                return status
             self._last_started[mode] = now
             starts.append(now)
 
-        self._submit(lambda: self._warm(engine))  # outside the lock: it starts a thread
+        self._submit(lambda: self._warm(self._engines[mode]))  # outside the lock: it starts a thread
         return WarmStatus.STARTED
+
+    def _status(
+        self, mode: str, now: float, starts: deque[float], last: float | None
+    ) -> tuple[WarmStatus, float | None]:
+        """What a warm for `mode` would answer right now, and how long until that changes.
+
+        `request()` decides with this and `report()` publishes it, so the budget can neither promise a
+        warm the server would refuse nor refuse one it would accept. A wait of `None` means no wait
+        will help: warming is switched off, the engine cannot be warmed, or the cap is zero.
+        """
+        if not self._policy.enabled:
+            return WarmStatus.DISABLED, None
+        if not self._engines[mode].available:
+            return WarmStatus.UNAVAILABLE, None
+        if self._policy.daily_cap <= 0:
+            return WarmStatus.CAPPED, None
+        blocked, wait = self._wait(now, starts, last)
+        return (blocked or WarmStatus.STARTED), (wait if blocked is not None else 0.0)
 
     def _wait(
         self, now: float, starts: deque[float], last: float | None
@@ -138,9 +151,11 @@ class EngineWarmer:
         """
         interval = self._policy.min_interval_seconds
         interval_wait = 0.0 if last is None else max(0.0, interval - (now - last))
+        # `daily_cap <= 0` never reaches here: `_status` reports it as a permanent block. Checking the
+        # length first also keeps an empty deque from being indexed when the cap is smaller than one.
         cap_wait = (
             0.0
-            if len(starts) < self._policy.daily_cap
+            if not starts or len(starts) < self._policy.daily_cap
             else max(0.0, ONE_DAY - (now - starts[0]))  # until the oldest start leaves the day
         )
         if cap_wait > interval_wait:
@@ -164,14 +179,14 @@ class EngineWarmer:
                 starts = self._starts.setdefault(mode, deque())
                 while starts and now - starts[0] >= ONE_DAY:
                     starts.popleft()
-                blocked, wait = self._wait(now, starts, self._last_started.get(mode))
+                status, wait = self._status(mode, now, starts, self._last_started.get(mode))
                 report[mode] = {
                     "used_today": len(starts),
                     "daily_cap": self._policy.daily_cap,
                     "interval_seconds": self._policy.min_interval_seconds,
-                    "next_warm_in": round(wait, 1),
-                    # what a request would answer right now: "started" means nothing is in the way
-                    "next_warm": blocked.value if blocked is not None else WarmStatus.STARTED.value,
+                    # `None`: no wait will help (off, unavailable, or a cap of zero)
+                    "next_warm_in": None if wait is None else round(wait, 1),
+                    "next_warm": status.value,  # what a request would answer right now
                 }
             return report
 

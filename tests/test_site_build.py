@@ -149,7 +149,7 @@ def test_the_page_warms_the_gpu_on_intent_not_on_arrival() -> None:
     assert '"focusin", warmOnReach' in template
     # The picker sits inside the uploader, so the section's handlers would warm a selection the visitor
     # is still changing: reaching for a checkbox is not intent, the settled selection is.
-    assert 'event.target.closest("#mode-checks")' in template
+    assert 'event.target.closest("#modes")' in template
     assert "setTimeout(warmGpu, WARM_SETTLE_MS)" in template
     # A cooldown, not a one-shot flag: the page outlives the GPU, and the next visit must warm again.
     assert "WARM_COOLDOWN_MS" in template
