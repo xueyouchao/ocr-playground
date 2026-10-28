@@ -5,6 +5,7 @@ the indexer both depend on.
 """
 from __future__ import annotations
 
+import threading
 import time
 
 import pytest
@@ -343,6 +344,52 @@ def test_a_comparison_that_produced_nothing_gives_up(tmp_path, png_bytes, monkey
 
     assert time.monotonic() - started < 2.0, "it waited the whole document budget"
     assert "did not answer in time" in str(raised.value)
+
+
+class PoliteButSlow:
+    """An engine that answers slowly and obeys the token: the one a give-up must actually stop.
+
+    Its two attempts model the retry a real engine does after a request comes back empty — the upload
+    that must not happen once the comparison has already told the visitor it gave up.
+    """
+
+    spec = GLM
+    available = True
+
+    def __init__(self) -> None:
+        self.stopped = threading.Event()
+        self.reads = 0
+
+    def identity(self) -> str:
+        return "polite"
+
+    def read(self, page: PageImage, deadline: float | None, cancel=None) -> str:
+        for _ in range(2):
+            self.reads += 1
+            for _ in range(20):  # ~1 s parked inside one request, long enough to be stopped mid-way
+                if cancel is not None and cancel():
+                    self.stopped.set()
+                    raise ClientGone()
+                time.sleep(0.05)
+        return "never"
+
+
+def test_a_comparison_that_gave_up_stops_the_engines_it_left_behind(
+    tmp_path, png_bytes, monkeypatch
+) -> None:
+    """Greptile's case: the handler released the slot, but the threads kept their own 900 s budget and
+    a parked probe would upload the page again for a comparison that had already reported a timeout."""
+    monkeypatch.setattr(read_document, "_COMPARISON_BUDGET", 0.2)
+    rig = build_rig(tmp_path, pages=1)
+    polite = PoliteButSlow()
+    rig.service._engines["glm"] = polite
+    rig.service._engines["fast"] = PoliteButSlow()
+
+    with pytest.raises(EngineTimeout):
+        rig.service.execute(source(png_bytes), "glm,fast")
+
+    assert polite.stopped.wait(1.0), "the engine was never told to stop"
+    assert polite.reads == 1, "it uploaded the page again after the comparison gave up"
 
 
 def test_a_row_that_answered_does_not_wait_out_a_dead_one(tmp_path, png_bytes, monkeypatch) -> None:

@@ -8,6 +8,7 @@ the engine read, so what the browser shows is what was parsed.
 from __future__ import annotations
 
 import random
+import threading
 import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -212,12 +213,21 @@ class ReadDocumentService:
         """Read one page with every engine that is still working, and keep the ones that answer."""
         pending = [engine for engine in engines if engine.spec.id not in failed]
         readings: list[PageReading] = []
+        # A comparison that gives up cannot recall the requests already on the wire, but it can stop
+        # the ones still to come: this token is set when the ceiling or the grace period fires, so a
+        # parked engine uploads nothing more once its current request returns. Without it the handler
+        # released the parse slot while threads with the document's 900 s budget were still working.
+        stopped = threading.Event()
+
+        def halted() -> bool:
+            return stopped.is_set() or (cancel is not None and cancel())
+
         if pending:
             pool = ThreadPoolExecutor(max_workers=len(pending))
             try:
                 running = {
                     engine.spec.id: pool.submit(
-                        self._read_in_turn, index, engine, image, budgets[engine.spec.id], cancel
+                        self._read_in_turn, index, engine, image, budgets[engine.spec.id], halted
                     )
                     for index, engine in enumerate(pending)
                 }
@@ -253,8 +263,10 @@ class ReadDocumentService:
                     if cancel is not None and cancel():
                         raise ClientGone()
                     if ceiling is not None and now > ceiling:
+                        stopped.set()
                         break
                     if answered_at is not None and now - answered_at > _STALL_GRACE:
+                        stopped.set()
                         break
                 # Whatever is still running is reported by name instead of held open: the page shows
                 # the rows that answered and says which ones did not, now rather than in fifteen minutes.

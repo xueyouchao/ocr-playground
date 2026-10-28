@@ -19,7 +19,12 @@ from fakes import (
     FakeWorkspace,
     registry,
 )
-from ocr_playground.application.warming import EngineWarmer, WarmPolicy, WarmStatus
+from ocr_playground.application.warming import (
+    ONE_DAY,
+    EngineWarmer,
+    WarmPolicy,
+    WarmStatus,
+)
 from ocr_playground.composition.container import Container, build_container
 from ocr_playground.domain.ports import PreWarmable
 from ocr_playground.domain.document import PageLimit, SourceDocument
@@ -225,7 +230,8 @@ def test_the_warm_budget_can_be_read_without_spending_it() -> None:
 
     before = warmer.report()
     assert before["glm"] == {
-        "used_today": 0, "daily_cap": 2, "interval_seconds": 90, "next_warm_in": 90,
+        "used_today": 0, "daily_cap": 2, "interval_seconds": 90,
+        "next_warm_in": 0, "next_warm": "started",  # nothing is in the way yet
     }
     assert jobs == [], "reading the budget must not start a warm"
 
@@ -234,10 +240,57 @@ def test_the_warm_budget_can_be_read_without_spending_it() -> None:
     assert warmer.report()["glm"]["used_today"] == 1
     assert warmer.report()["glm"]["next_warm_in"] == 60
 
+    assert warmer.report()["glm"]["next_warm"] == "throttled"
     assert warmer.request("glm") == WarmStatus.THROTTLED, "30 s is inside the 90 s window"
     clock.now += 61
     assert warmer.request("glm") == WarmStatus.STARTED, "past the window, and the cap allows two"
+
+    # The cap is now the binding limit, and the wait is until the oldest start leaves the rolling day —
+    # not zero, which is what a report built only from the interval said.
+    spent = warmer.report()["glm"]
+    assert spent["next_warm"] == "capped"
+    assert spent["used_today"] == 2
+    assert spent["next_warm_in"] == round(ONE_DAY - 91, 1)
     assert warmer.request("glm") == WarmStatus.CAPPED
+
+
+def test_a_zero_cap_is_a_refusal_not_a_crash() -> None:
+    """`GLM_OCR_WARM_DAILY_CAP=0` switches warming off through the budget; it may not raise."""
+    warmer = EngineWarmer(
+        engines={"glm": FakeWarmEngine(GLM)},
+        registry=registry(),
+        clock=FakeClock(),
+        policy=WarmPolicy(min_interval_seconds=90, daily_cap=0),
+        submit=lambda job: None,
+    )
+
+    assert warmer.request("glm") == WarmStatus.CAPPED
+    budget = warmer.report()["glm"]
+    assert budget["next_warm"] == "capped"
+    assert budget["next_warm_in"] is None, "no wait helps when the cap is zero"
+
+
+def test_the_budget_says_what_a_request_would_say() -> None:
+    """The report is a promise about `request()`: off and unavailable are not `started`."""
+    off = EngineWarmer(
+        engines={"glm": FakeWarmEngine(GLM)},
+        registry=registry(),
+        clock=FakeClock(),
+        policy=WarmPolicy(enabled=False),
+        submit=lambda job: None,
+    )
+    assert off.report()["glm"]["next_warm"] == "disabled"
+    assert off.report()["glm"]["next_warm_in"] is None
+
+    cold = EngineWarmer(
+        engines={"glm": FakeWarmEngine(GLM, available=False)},
+        registry=registry(),
+        clock=FakeClock(),
+        policy=WarmPolicy(),
+        submit=lambda job: None,
+    )
+    assert cold.report()["glm"]["next_warm"] == "unavailable"
+    assert cold.report()["glm"]["next_warm_in"] is None
 
 
 def test_only_the_remote_engine_can_be_warmed() -> None:
