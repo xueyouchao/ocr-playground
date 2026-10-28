@@ -5,11 +5,19 @@ the indexer both depend on.
 """
 from __future__ import annotations
 
+import time
+
 import pytest
 
-from fakes import build_rig
-from ocr_playground.application.errors import EngineFailure, EngineTimeout, EngineUnavailable
-from ocr_playground.domain.document import PageLimit, SourceDocument
+from fakes import FAST, GLM, FakeEngine, build_rig
+from ocr_playground.application import read_document
+from ocr_playground.application.errors import (
+    ClientGone,
+    EngineFailure,
+    EngineTimeout,
+    EngineUnavailable,
+)
+from ocr_playground.domain.document import PageImage, PageLimit, SourceDocument
 from ocr_playground.domain.errors import UnknownMode
 from ocr_playground.interfaces.evidence import document_evidence
 
@@ -222,3 +230,150 @@ def test_a_mode_list_is_deduplicated_and_order_preserved(tmp_path, png_bytes) ->
     rig = build_rig(tmp_path, pages=1)
     document = rig.service.execute(source(png_bytes), " fast , glm , fast ")
     assert [engine.id for engine in document.engines] == ["liteparse-tesseract", "glm-ocr"]
+
+
+# --- a client that hung up ------------------------------------------------------------
+
+
+def test_a_client_that_hangs_up_is_not_a_pane_failure(tmp_path, png_bytes) -> None:
+    """The page was closed; there is nobody to read the answer, so it must not be reported as a row
+    that failed. `ClientGone` leaves the fan-out instead of landing in the document."""
+    rig = build_rig(tmp_path, pages=1)
+    rig.service._engines["glm"] = FakeEngine(GLM, error=ClientGone())  # type: ignore[index]
+
+    with pytest.raises(ClientGone):
+        rig.service.execute(source(png_bytes), "glm,fast")
+
+
+class Parked:
+    """A row waiting on a cold container: nothing comes back until the token says nobody cares."""
+
+    spec = GLM
+    available = True
+
+    def identity(self) -> str:
+        return "parked"
+
+    def read(self, page: PageImage, deadline: float | None, cancel=None) -> str:
+        while not (cancel and cancel()):
+            time.sleep(0.01)
+        raise ClientGone()
+
+
+@pytest.fixture(autouse=True)
+def _no_stagger(monkeypatch):
+    """The stagger is real in production and noise in a test that measures elapsed time."""
+    monkeypatch.setattr(read_document, "_STAGGER_LOW", 0.0)
+    monkeypatch.setattr(read_document, "_STAGGER_HIGH", 0.0)
+
+
+class Timed:
+    """Records when each engine started, for the stagger."""
+
+    def __init__(self, spec, log: list[tuple[str, float]]) -> None:
+        self.spec = spec
+        self.available = True
+        self._log = log
+
+    def identity(self) -> str:
+        return f"timed-{self.spec.id}"
+
+    def read(self, page: PageImage, deadline: float | None, cancel=None) -> str:
+        self._log.append((self.spec.id, time.monotonic()))
+        return "text"
+
+
+def test_the_rows_do_not_all_boot_at_once(tmp_path, png_bytes, monkeypatch) -> None:
+    """Four apps asked in the same instant race for one GPU; a tenth of a second apart they do not."""
+    monkeypatch.setattr(read_document, "_STAGGER_LOW", 0.05)
+    monkeypatch.setattr(read_document, "_STAGGER_HIGH", 0.06)
+    log: list[tuple[str, float]] = []
+    rig = build_rig(tmp_path, pages=1)
+    rig.service._engines["glm"] = Timed(GLM, log)
+    rig.service._engines["fast"] = Timed(FAST, log)
+
+    rig.service.execute(source(png_bytes), "glm,fast")
+
+    assert [engine_id for engine_id, _ in log] == [GLM.id, FAST.id], "the request order was not kept"
+    assert log[1][1] - log[0][1] > 0.04, "the second row started with the first"
+
+
+class Deaf:
+    """A row parked inside a request it cannot interrupt — an upload already on the wire.
+
+    It notices nothing, not even the token; only a wait that harvests in arrival order can surface a
+    cancellation that another row has already reported.
+    """
+
+    spec = GLM
+    available = True
+
+    def identity(self) -> str:
+        return "deaf"
+
+    def read(self, page: PageImage, deadline: float | None, cancel=None) -> str:
+        time.sleep(2.0)
+        return "too late to matter"
+
+
+def test_a_cancellation_is_not_queued_behind_a_deaf_engine(tmp_path, png_bytes) -> None:
+    """Greptile's case: the first engine is stuck in a request, a later one says the client is gone.
+    Waiting in request order would sit on the first engine for the whole budget."""
+    started = time.monotonic()
+    rig = build_rig(tmp_path, pages=1)
+    rig.service._engines["glm"] = Deaf()
+    rig.service._engines["fast"] = FakeEngine(FAST, error=ClientGone())
+
+    with pytest.raises(ClientGone):
+        rig.service.execute(source(png_bytes), "glm,fast")
+
+    assert time.monotonic() - started < 1.5, "the cancellation waited behind the deaf engine"
+
+
+def test_a_comparison_that_produced_nothing_gives_up(tmp_path, png_bytes, monkeypatch) -> None:
+    """No row has answered, so there is nothing to show: waiting out the 900 s budget buys nothing."""
+    monkeypatch.setattr(read_document, "_COMPARISON_BUDGET", 0.3)
+    rig = build_rig(tmp_path, pages=1)
+    rig.service._engines["glm"] = Deaf()
+    rig.service._engines["fast"] = Deaf()
+
+    started = time.monotonic()
+    with pytest.raises(EngineTimeout) as raised:
+        rig.service.execute(source(png_bytes), "glm,fast")
+
+    assert time.monotonic() - started < 2.0, "it waited the whole document budget"
+    assert "did not answer in time" in str(raised.value)
+
+
+def test_a_row_that_answered_does_not_wait_out_a_dead_one(tmp_path, png_bytes, monkeypatch) -> None:
+    """One good row plus one dead row is a page, not a reason to hold the page for a quarter hour."""
+    monkeypatch.setattr(read_document, "_STALL_GRACE", 0.3)
+    rig = build_rig(tmp_path, pages=1)
+    rig.service._engines["glm"] = Deaf()
+    rig.service._engines["fast"] = FakeEngine(FAST)
+
+    started = time.monotonic()
+    document = rig.service.execute(source(png_bytes), "glm,fast")
+
+    assert time.monotonic() - started < 1.5, "it waited for the dead row"
+    page = document.pages[0]
+    assert [one.engine_id for one in page.readings] == [FAST.id]
+    assert [one.engine_id for one in page.failures] == [GLM.id]
+    assert "did not answer in time" in page.failures[0].message
+
+
+def test_a_parked_engine_does_not_hold_the_request_after_the_client_leaves(
+    tmp_path, png_bytes
+) -> None:
+    """The parked row is what made a dead comparison hang for the whole budget. Once the client is
+    gone the document stops, and nothing waits for the engine that was still parked."""
+    started = time.monotonic()
+    rig = build_rig(tmp_path, pages=1)
+    rig.service._engines["glm"] = Parked()  # type: ignore[index]
+
+    def client_left() -> bool:
+        return time.monotonic() - started > 0.3
+
+    with pytest.raises(ClientGone):
+        rig.service.execute(source(png_bytes), "glm,fast", cancel=client_left)
+    assert time.monotonic() - started < 2, "the request outlived the client by more than the poll"

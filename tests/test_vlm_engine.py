@@ -7,12 +7,14 @@ from __future__ import annotations
 import json
 import threading
 import time
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
 
-from ocr_playground.application.errors import EngineFailure, EngineTimeout
+from ocr_playground.application.errors import ClientGone, EngineFailure, EngineTimeout
 from ocr_playground.domain.document import PageImage
 from ocr_playground.infrastructure.engines import GLM_SPEC, VlmEngine, vlm
 from ocr_playground.infrastructure.engines.vlm import MAX_UPLOADS
@@ -29,6 +31,10 @@ class Stub:
         self.drop_over: int | None = None
         self.drop_budget = 0
         self.dropped: list[str] = []
+        # A probe the edge holds open while a container boots, then drops without answering.
+        self.park_probes = 0
+        self.park_for = 0.0
+        self.parked: list[str] = []
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler(script))
         self.server.daemon_threads = True
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -61,6 +67,14 @@ class Stub:
                     self.connection.close()  # before the page is read: what the edge does
                     return
                 body = json.loads(self.rfile.read(length) or b"{}")
+                if stub.park_probes and not body.get("messages"):
+                    # Recorded before the hold: the client times out and carries on without us, so
+                    # the assertion must not race the sleep.
+                    stub.parked.append(self.path)
+                    stub.park_probes -= 1
+                    time.sleep(stub.park_for)
+                    self.close_connection = True
+                    return
                 stub.requests.append({"path": self.path, "body": body})
                 status, headers, payload = script(self.path, body)
                 encoded = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
@@ -256,6 +270,73 @@ def test_a_flapping_endpoint_is_not_handed_the_page_forever(endpoint, tmp_path) 
     assert len(stub.dropped) == MAX_UPLOADS, "the page is offered exactly MAX_UPLOADS times"
     assert len(stub.requests) == MAX_UPLOADS, "one kilobyte probe per attempt, then it stops"
     assert all(not request["body"].get("messages") for request in stub.requests)
+
+
+def test_a_parked_probe_gets_the_whole_budget(tmp_path, monkeypatch) -> None:
+    """The edge parks the probe while a container boots. Cutting it short would abandon our place in
+    that queue and go to the back of it, which is slower than waiting."""
+    seen: list[float] = []
+
+    class Answer:
+        def read(self) -> bytes:
+            return json.dumps({"choices": [{"message": {"content": "read while parked"}}]}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc) -> bool:
+            return False
+
+    class Opener:
+        def open(self, request, timeout=None):
+            seen.append(timeout)
+            if len(seen) == 1:  # the page: the edge answers with a handoff, nothing is serving yet
+                raise urllib.error.HTTPError(
+                    request.full_url, 303, "See Other", {"Location": "/cold"}, None
+                )
+            return Answer()
+
+    monkeypatch.setattr(vlm.urllib.request, "build_opener", lambda *a, **k: Opener())
+    engine = VlmEngine(
+        spec=GLM_SPEC, base_url="https://cold.example", model="m", prompt="p",
+        api_key="k", request_timeout=600,
+    )
+
+    assert engine.read(page(tmp_path, b"png" + b"\0" * 4096), time.monotonic() + 600) == \
+        "read while parked"
+    assert seen[-1] > 100, "the probe was cut short instead of being allowed to wait"
+
+
+def test_the_retry_backoff_is_jittered(monkeypatch) -> None:
+    """Deterministic backoff keeps every loser of a GPU race aligned; jitter is what unsticks them."""
+    monkeypatch.setattr(vlm, "_RETRY_PAUSE", 2.0)
+    monkeypatch.setattr(vlm.random, "uniform", lambda low, high: 0.5)
+    low = vlm._backoff(3)
+    monkeypatch.setattr(vlm.random, "uniform", lambda low, high: 1.5)
+    high = vlm._backoff(3)
+
+    assert high == pytest.approx(3 * low), "the step is not spread"
+    assert high <= 30.0 * 1.5, "the cap stopped applying"
+    assert vlm._backoff(99) <= 45.0
+
+
+def test_a_cancelled_read_stops_walking_the_handoffs(endpoint, tmp_path) -> None:
+    """The tab was closed while the engine was still handing off. Stop asking, and put the page on the
+    wire no more than the once it already cost — the point is to stop paying, not to finish."""
+    checks = {"n": 0}
+
+    def cancel() -> bool:
+        checks["n"] += 1
+        return checks["n"] > 3
+
+    stub, engine = endpoint(lambda path, body: (303, {"Location": "/cold"}, b""))
+
+    with pytest.raises(ClientGone):
+        engine.read(page(tmp_path, b"png" + b"\0" * 4096), time.monotonic() + 30, cancel)
+
+    assert checks["n"] > 3, "the token was never asked"
+    assert len(stub.requests) < 8, "it walked on instead of stopping"
+    assert sum(1 for request in stub.requests if request["body"].get("messages")) == 1
 
 
 def test_an_http_error_is_a_bad_gateway(endpoint, tmp_path) -> None:

@@ -24,15 +24,17 @@ from __future__ import annotations
 import base64
 import http.client
 import json
+import random
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
-from ...application.errors import EngineFailure, EngineTimeout
+from ...application.errors import ClientGone, EngineFailure, EngineTimeout
 from ...domain.document import PageImage
 from ...domain.engine import EngineSpec
+from ...domain.ports import Cancel
 
 # The statuses Modal uses to hand a cold request to the attempt URL that waits for the container.
 _HANDOFFS = (303, 307, 308)
@@ -45,6 +47,16 @@ MAX_UPLOADS = 6
 # kilobyte, and a hop that comes back in a millisecond is not a boot in progress).
 _HOP_PAUSE = 0.05
 _RETRY_PAUSE = 2.0
+
+
+def _backoff(failures: int) -> float:
+    """Exponential, capped, and jittered.
+
+    Deterministic backoff makes every client that hit the same wall retry at the same instant, forever
+    aligned: four engines that all lost a race for one GPU keep re-asking as a wall, and each round they
+    lose the same way. Half-to-double spreads them out without ever retrying sooner than half the step.
+    """
+    return min(_RETRY_PAUSE * 2 ** min(failures - 1, 4), 30.0) * random.uniform(0.5, 1.5)
 
 GLM_SPEC = EngineSpec(
     id="glm-ocr",
@@ -103,6 +115,18 @@ UNLIMITED_SPEC = EngineSpec(
     device="remote · GPU L4 (Modal)",
     needs="UNLIMITED_OCR_BASE_URL",
 )
+
+
+def _pause(seconds: float, cancel: Cancel | None) -> None:
+    """Sleep, but wake up for a client that has gone: a cancelled read must not sit out its backoff."""
+    until = time.monotonic() + max(0.0, seconds)
+    while True:
+        left = until - time.monotonic()
+        if left <= 0:
+            return
+        if cancel is not None and cancel():
+            raise ClientGone()
+        time.sleep(min(left, 0.25))
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -166,7 +190,9 @@ class VlmEngine:
         except (OSError, urllib.error.URLError):
             return False
 
-    def read(self, page: PageImage, deadline: float | None = None) -> str:
+    def read(
+        self, page: PageImage, deadline: float | None = None, cancel: Cancel | None = None
+    ) -> str:
         raw = page.path.read_bytes()
         # An upload keeps its own bytes, so the suffix is not proof of the format; the first two
         # bytes are. PDF pages and converted TIFF/WebP are PNG, an uploaded JPEG stays JPEG.
@@ -206,6 +232,8 @@ class VlmEngine:
                     f"{self.spec.name} did not finish within the time limit — try again once the "
                     "GPU is warm, or use the fast option (LiteParse + Tesseract)"
                 )
+            if cancel is not None and cancel():
+                raise ClientGone()
             if ready:
                 uploads += 1
                 if uploads > MAX_UPLOADS:
@@ -213,9 +241,17 @@ class VlmEngine:
             request = urllib.request.Request(
                 url, data=data if ready else ping, headers=headers, method="POST"
             )
+            # One wait for the whole budget, page or probe. A probe is the request the edge parks while
+            # a container boots, so cutting it short only throws away our place in that queue; a read
+            # that must stop early stops because the client left, not because a timer fired.
+            wait = min(self._request_timeout, remaining)
             try:
-                with opener.open(request, timeout=min(self._request_timeout, remaining)) as response:
+                with opener.open(request, timeout=wait) as response:
                     answer = json.loads(response.read().decode())
+            except TimeoutError:
+                raise EngineTimeout(
+                    f"the {self.spec.name} endpoint did not answer within the time limit"
+                ) from None
             except urllib.error.HTTPError as error:
                 # A cold start hands off however many times the container needs; only the budget,
                 # checked above, decides when that has gone on too long.
@@ -228,7 +264,7 @@ class VlmEngine:
                     ready = False  # nothing is serving this yet, so stop sending the page
                     left = budget - time.monotonic() - 1  # the hop may have used what was left
                     if left > 0:
-                        time.sleep(min(_HOP_PAUSE, left))
+                        _pause(min(_HOP_PAUSE, left), cancel)
                     continue
                 if not ready:
                     # A 400 to the kilobyte is still a container reading it, so one is serving now.
@@ -237,7 +273,7 @@ class VlmEngine:
                 raise EngineFailure(
                     f"the {self.spec.name} endpoint answered {error.code}: {detail or 'no detail'}"
                 ) from error
-            except (TimeoutError, OSError, http.client.HTTPException) as error:
+            except (OSError, http.client.HTTPException) as error:
                 if ready:  # the page died on the wire; say so, it is the interesting failure
                     sys.stderr.write(
                         f"{self.spec.id}: the page upload was dropped ({error}); retrying with a "
@@ -247,13 +283,13 @@ class VlmEngine:
                 failures += 1
                 # Back off: a boot is minutes long, so hammering it only wastes connections, while
                 # an endpoint that is genuinely gone should not be dialled 400 times.
-                pause = min(_RETRY_PAUSE * 2 ** min(failures - 1, 4), 30.0)
+                pause = _backoff(failures)
                 # The clock is read again here: the request that just failed may have eaten the rest
                 # of the budget, and a timeout the caller is waiting on must not be delayed by a sleep
                 # that was sized before the request ran.
                 left = budget - time.monotonic() - 1
                 if left > 0:
-                    time.sleep(min(pause, left))
+                    _pause(min(pause, left), cancel)
                 continue
 
             if not ready:

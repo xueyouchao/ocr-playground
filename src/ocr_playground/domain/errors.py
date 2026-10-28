@@ -37,6 +37,14 @@ class UnreadablePageCount(DomainError):
         super().__init__("could not read the page count from that PDF")
 
 
+class TooManyModes(DomainError):
+    """A comparison asks several engines to read the same page; the picker is meant to stay small."""
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        super().__init__(f"a comparison reads at most {limit} parsers at once")
+
+
 class UnknownMode(DomainError):
     def __init__(self, mode: str, modes: Iterable[str]) -> None:
         self.mode = mode

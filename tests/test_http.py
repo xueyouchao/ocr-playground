@@ -31,10 +31,15 @@ from fakes import (
     registry,
     sample_document,
 )
-from ocr_playground.application.errors import EngineFailure, EngineTimeout, EngineUnavailable
+from ocr_playground.application.errors import (
+    ClientGone,
+    EngineFailure,
+    EngineTimeout,
+    EngineUnavailable,
+)
 from ocr_playground.application.warming import EngineWarmer, WarmPolicy
 from ocr_playground.composition.container import Container
-from ocr_playground.domain.engine import EngineRegistry
+from ocr_playground.domain.engine import EngineRegistry, EngineSpec
 from ocr_playground.domain.errors import UnknownMode
 from ocr_playground.infrastructure.process import CommandTimedOut
 from ocr_playground.interfaces.evidence import document_evidence
@@ -157,6 +162,41 @@ def test_an_unknown_mode_names_the_two_choices(api) -> None:
     )
     assert status == 400
     assert payload(body) == {"error": "'nope' is not an extraction mode; use glm or fast"}
+
+
+def test_a_comparison_is_capped_at_three_parsers(api) -> None:
+    """Three GPUs at once is what the pool carries; a fourth row would only queue behind the others."""
+    service = StubService(document=sample_document())
+    extra = [
+        EngineSpec(id=f"extra{n}", name=f"Extra {n}", kind="vlm", pipeline="p", device="d",
+                   needs="a GPU")
+        for n in (1, 2)
+    ]
+    service.registry = EngineRegistry(
+        {"glm": GLM, "fast": FAST, **{spec.id: spec for spec in extra}}, "glm"
+    )
+    service._engines.update(
+        {spec.id: type("Engine", (), {"spec": spec})() for spec in extra}
+    )
+    base, _ = api(service=service)
+
+    status, _, body = call(
+        base, "/api/parse", method="POST", body=b"x",
+        headers={"Content-Type": "image/png", "X-Mode": "glm,fast,extra1,extra2"},
+    )
+
+    assert status == 400, "four parsers were accepted"
+    assert payload(body) == {"error": "a comparison reads at most 3 parsers at once"}
+
+
+def test_a_doubled_mode_is_not_a_second_parser(api) -> None:
+    """The cap counts parsers, not commas: asking for the same one twice is still one row."""
+    base, _ = api(service=StubService(document=sample_document()))
+    status, _, _ = call(
+        base, "/api/parse", method="POST", body=b"x",
+        headers={"Content-Type": "image/png", "X-Mode": "glm,glm,glm,glm"},
+    )
+    assert status != 400
 
 
 def test_glm_without_an_endpoint_says_so_and_offers_the_fast_path(api, tmp_path) -> None:
@@ -347,6 +387,32 @@ def test_the_intent_ping_starts_the_gpu(api):
     assert len(jobs) == 1
 
 
+def test_health_says_what_the_warm_budget_is(api):
+    """The question "is the warm path working" is one request, not an investigation."""
+    base, _ = api(glm_base_url="http://127.0.0.1:9/v1")
+    _, _, body = call(base, "/api/health")
+
+    health = json.loads(body)
+    budget = health["warm"]
+    assert budget["enabled"] is True
+    assert budget["engines"]["glm"] == {
+        "used_today": 0, "daily_cap": 100, "interval_seconds": 90, "next_warm_in": 90,
+    }
+    assert "fast" not in budget["engines"], "a native parser has no GPU to keep warm"
+
+
+def test_a_warm_names_the_engine_it_started(api, capfd):
+    """A warm rents GPU time from boot to scale-down, so the log has to say which engine it was for:
+    "why did mineru start when I had unticked it" should not need the dashboard to answer."""
+    engine = FakeWarmEngine(GLM)
+    base, container = api(glm_base_url="http://127.0.0.1:9/v1")
+    container.warmer.override(warmer_for(engine, []))
+
+    call(base, "/api/warm", method="POST", headers={"X-Mode": "glm"})
+
+    assert "warm glm: started" in capfd.readouterr().err
+
+
 def test_a_second_ping_inside_the_interval_costs_nothing(api):
     base, container = api(glm_base_url="http://127.0.0.1:9/v1")
     container.warmer.override(warmer_for(FakeWarmEngine(GLM), [], min_interval_seconds=300))
@@ -511,3 +577,41 @@ def test_a_comparison_with_one_unconfigured_engine_is_refused(api):
     })
     assert status == 503
     assert "Chandra OCR 2" in payload(body)["error"]
+
+
+class HangingService:
+    """A use case that hangs the way a cold GPU does, and records whether it was told to stop."""
+
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.cancelled = threading.Event()
+        self._stub = StubService()
+
+    def require_mode(self, mode: str):
+        return self._stub.require_mode(mode)
+
+    def execute(self, source, mode, *, cancel=None, **kwargs):
+        self.started.set()
+        while not (cancel and cancel()):
+            time.sleep(0.01)
+        self.cancelled.set()
+        raise ClientGone()
+
+
+def test_a_client_that_hangs_up_stops_the_parse(api) -> None:
+    """A parse can hold its thread for minutes waiting on a boot. If the tab is closed the work must
+    stop then and there, not run to the budget and answer into a socket that is already gone."""
+    service = HangingService()
+    base, _ = api(service=service)
+    host, port = base.removeprefix("http://").split(":")
+    body = b"\x89PNG" + b"x" * 64
+    head = (
+        f"POST /api/parse HTTP/1.1\r\nHost: {host}\r\nX-Mode: fast\r\n"
+        f"Content-Type: image/png\r\nContent-Length: {len(body)}\r\n\r\n"
+    ).encode()
+
+    with socket.create_connection((host, int(port)), timeout=5) as client:
+        client.sendall(head + body)
+        assert service.started.wait(5), "the parse never started"
+    # leaving the block closed the socket, which is exactly what closing the tab does
+    assert service.cancelled.wait(5), "the parse kept running after the client hung up"

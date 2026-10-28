@@ -123,7 +123,9 @@ class FakeEngine:
     def identity(self) -> str:
         return f"{self.spec.id} identity"
 
-    def read(self, page: PageImage, deadline: float | None) -> str:
+    def read(
+        self, page: PageImage, deadline: float | None, cancel: object = None
+    ) -> str:
         self.reads.append((page.number, deadline))
         if self._error is not None:
             raise self._error

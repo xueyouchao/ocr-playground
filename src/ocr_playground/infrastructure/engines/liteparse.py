@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from ...domain.document import PageImage
 from ...domain.engine import EngineSpec
+from ...domain.ports import Cancel
 from ..process import ProcessRunner
 from ..versions import first_line
 
@@ -39,7 +40,13 @@ class LiteParseEngine:
             f"tesseract={first_line(['tesseract', '--version'])}"
         )
 
-    def read(self, page: PageImage, deadline: float | None = None) -> str:
+    def read(
+        self, page: PageImage, deadline: float | None = None, cancel: Cancel | None = None
+    ) -> str:
+        # One local subprocess, a second or two: there is no parked wait to abandon here. The token is
+        # accepted so every engine has the same shape, and ignored because checking it would only add
+        # a branch between the upload and the answer.
+
         return self._runner.run(
             [self._lit, "parse", str(page.path), "--format", "markdown", "-q"]
         ).strip()

@@ -15,3 +15,6 @@ __pycache__/
 
 # scratch screenshots of the page, not artefacts of the build
 .find-*.png
+
+# the codebase indexer's local overrides (tooling, not the repo's contract)
+.cbmignore

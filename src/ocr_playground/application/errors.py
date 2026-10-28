@@ -21,3 +21,11 @@ class EngineTimeout(ApplicationError):
 
 class EngineFailure(ApplicationError):
     """The engine answered, but not with a reading — a 502."""
+
+
+class ClientGone(Exception):
+    """The client hung up before the reading finished. Not an engine failure — nothing went wrong.
+
+    There is simply nobody left to read the answer, so the fan-out stops starting work and the handler
+    closes the connection instead of answering into a socket that is already gone.
+    """

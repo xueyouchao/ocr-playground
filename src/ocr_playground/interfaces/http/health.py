@@ -54,6 +54,7 @@ def build_health(
     *,
     max_upload_bytes: int,
     max_pages: int,
+    warm: dict | None = None,
 ) -> dict:
     modes = []
     for mode in registry.modes:
@@ -66,9 +67,13 @@ def build_health(
             "cold_start": copy.get("cold_start", False),
             "detail": copy.get("detail", spec.pipeline),
         })
-    return {
+    payload = {
         "ok": True,
         "default_mode": registry.default_mode,
         "modes": modes,
         "limits": {"bytes": max_upload_bytes, "pages": max_pages},
     }
+    if warm is not None:
+        # A warm rents GPU time, so how much of the budget is left is part of being healthy.
+        payload["warm"] = warm
+    return payload

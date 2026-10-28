@@ -56,6 +56,11 @@ with `GLM_OCR_BASE_URL` missing, the page selects the fast path (LiteParse + Tes
 GPUs scale to zero, so the first upload after idle waits minutes for the model to boot; the container
 holds the request for up to `GLM_OCR_BUDGET_SECONDS` (900 s) rather than giving up.
 
+The block above is the general recipe; on this host the real values live in `deploy/run_api.sh`, which
+builds the image, recreates the container and waits for `/api/health`. It deliberately does not set
+`GLM_OCR_WARM_DAILY_CAP` — the code default is the documented one, and an override there is how the
+deployed cap drifted from 100 to 20.
+
 It is unauthenticated and public, and so is the Modal endpoint behind it. The only defences are the
 caps in `scripts/api.py` (20 MB, 5 pages, 120 s per fast parse, 900 s for a whole GLM document, two
 parses at a time) and the fact that nothing it receives is written to disk outside a temporary

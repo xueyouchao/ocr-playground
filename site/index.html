@@ -1145,7 +1145,7 @@ async function loadModes() {
 // a box being ticked, or a pointer or keyboard landing on the uploader — never on page load alone,
 // and never for the CPU path. Every cold parser that was ticked is pinged; the server throttles them
 // to one boot per interval and caps the day, so the extras wait for their turn.
-const WARM_COOLDOWN_MS = 60000;
+const WARM_COOLDOWN_MS = 90000;  // match the service: one warm per engine per 90 s
 const warmedAt = {};
 
 function warmGpu() {
@@ -1160,8 +1160,19 @@ function warmGpu() {
   }
 }
 
+// Reaching for the uploader is intent, so it warms at once; a tick in the picker is not — the visitor
+// may be about to untick it, and a warm cannot be called back (it rents a GPU from boot to scale-down).
 $("uploader").addEventListener("pointerenter", warmGpu);
 $("uploader").addEventListener("focusin", warmGpu);
+
+const WARM_SETTLE_MS = 800;
+let warmTimer = null;
+function warmSoon() {
+  clearTimeout(warmTimer);
+  warmTimer = setTimeout(warmGpu, WARM_SETTLE_MS);
+}
+
+const MAX_MODES = 3;
 
 $("mode-checks").addEventListener("change", (event) => {
   const box = event.target.closest("input[type=checkbox]");
@@ -1172,16 +1183,29 @@ $("mode-checks").addEventListener("change", (event) => {
     box.checked = true;
     return;
   }
+  if (chosen.length > MAX_MODES) {
+    // Three GPUs at once is what the pool carries; the fourth row would only queue behind them.
+    box.checked = false;
+    uploadStatus(`${MAX_MODES} parsers at a time is the most this compares — untick one first`, true);
+    return;
+  }
   state.modes = chosen;
   userChoseMode = true;
   applyModes();
-  warmGpu();
+  warmSoon();
   uploadStatus(modeNote(state.modes));
 });
+
+// The upload in flight, so a second one can abandon it. The server stops working the moment the
+// request is closed, which is the difference between a retry queueing and a retry paying twice.
+let uploadInFlight = null;
 
 async function readUpload(file) {
   // The request's own parsers, not the picker's: the picker is disabled, but health may still land.
   const modes = state.modes.slice();
+  if (uploadInFlight) uploadInFlight.abort();
+  uploadInFlight = new AbortController();
+  const signal = uploadInFlight.signal;
   setUploadBusy(true);
   const started = Date.now();
   const ticker = setInterval(() => {
@@ -1197,6 +1221,7 @@ async function readUpload(file) {
         "X-Mode": modes.join(","),
       },
       body: file,
+      signal,
     });
     const body = await response.json().catch(() => ({ error: response.statusText }));
     if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
@@ -1218,15 +1243,26 @@ async function readUpload(file) {
       + (silent ? ` · ${silent} could not read it` : ""));
     render();
   } catch (error) {
+    if (error.name === "AbortError") {
+      // Replaced by a newer upload (or the tab is closing): say nothing, the new one is on screen.
+      return;
+    }
     const hint = !modes.includes("fast")
       ? " — or tick LiteParse + Tesseract, the fast option."
       : "";
     uploadStatus(`could not read that file — ${error.message}${hint}`, true);
   } finally {
     clearInterval(ticker);
+    if (!signal.aborted) uploadInFlight = null;
     setUploadBusy(false);
   }
 }
+
+window.addEventListener("pagehide", () => {
+  // Closing the tab abandons the parse too; without this the socket lingers until the browser gets
+  // around to it, and the server keeps paying for a page nobody will read.
+  if (uploadInFlight) uploadInFlight.abort();
+});
 
 $("read-file").addEventListener("click", () => {
   const file = $("file").files[0];

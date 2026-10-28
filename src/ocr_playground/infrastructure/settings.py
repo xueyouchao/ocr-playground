@@ -61,8 +61,8 @@ class Settings:
     # the same time. The timeout has to outlast the boot it waits for, or a warm that worked is
     # logged as a failure.
     warm_enabled: bool = True
-    warm_min_interval_seconds: int = 120
-    warm_daily_cap: int = 40
+    warm_min_interval_seconds: int = 90
+    warm_daily_cap: int = 100
     warm_timeout_seconds: int = 300
 
     @classmethod
@@ -84,8 +84,8 @@ class Settings:
             lit_path=lit,
             warm_enabled=values.get("GLM_OCR_WARM", "1").strip().lower()
             not in ("0", "false", "no", "off"),
-            warm_min_interval_seconds=int(values.get("GLM_OCR_WARM_INTERVAL", "120")),
-            warm_daily_cap=int(values.get("GLM_OCR_WARM_DAILY_CAP", "40")),
+            warm_min_interval_seconds=int(values.get("GLM_OCR_WARM_INTERVAL", "90")),
+            warm_daily_cap=int(values.get("GLM_OCR_WARM_DAILY_CAP", "100")),
             warm_timeout_seconds=int(values.get("GLM_OCR_WARM_TIMEOUT", "300")),
         )
 
