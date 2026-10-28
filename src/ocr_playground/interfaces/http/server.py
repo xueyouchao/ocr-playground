@@ -169,11 +169,16 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         if self.path.split("?")[0] == "/api/health":
             settings = self.container.settings()
+            warmer = self.container.warmer()
             self._json(HTTPStatus.OK, build_health(
                 self.container.registry(),
                 self.container.engines(),
                 max_upload_bytes=settings.max_upload_bytes,
                 max_pages=settings.max_pages,
+                warm={
+                    "enabled": settings.warm_enabled,
+                    "engines": warmer.report(),
+                },
             ))
             return
         self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})

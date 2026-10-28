@@ -12,13 +12,14 @@ from fakes import (
     FAST,
     GLM,
     FakeClock,
+    FakeWarmEngine,
     FakeEngine,
     FakePreviewEncoder,
     FakeRenderer,
     FakeWorkspace,
     registry,
 )
-from ocr_playground.application.warming import WarmStatus
+from ocr_playground.application.warming import EngineWarmer, WarmPolicy, WarmStatus
 from ocr_playground.composition.container import Container, build_container
 from ocr_playground.domain.ports import PreWarmable
 from ocr_playground.domain.document import PageLimit, SourceDocument
@@ -179,7 +180,7 @@ def test_the_warm_policy_comes_from_configuration() -> None:
 
 
 def test_warming_is_throttled_by_default_and_can_be_switched_off() -> None:
-    assert Container().warm_policy().min_interval_seconds == 120
+    assert Container().warm_policy().min_interval_seconds == 90
     assert Container().warm_policy().daily_cap == 40
 
     off = build_container({"GLM_OCR_WARM": "0", "GLM_OCR_WARM_DAILY_CAP": "3"})
@@ -193,7 +194,8 @@ def test_the_warm_interval_fits_inside_the_warm_window() -> None:
 
     The warm window is `scaledown_window` in each Modal app: the GPU stays up that long after the
     last request. Waiting longer than that to allow the next warm hands the visitor the cold start
-    the path exists to remove — which is how 300 s of throttle against a 120 s window behaved.
+    the path exists to remove — which is how 300 s of throttle against a 120 s window behaved. Waiting
+    exactly that long is worse than useless: it is the same race, decided by a second.
     """
     windows: list[int] = []
     for app in sorted((ROOT / "deploy" / "modal").glob("serve_*.py")):
@@ -202,7 +204,40 @@ def test_the_warm_interval_fits_inside_the_warm_window() -> None:
             windows.append(int(declared.group(1)))
 
     assert len(windows) == 6, "the six GPU apps each declare their warm window"
-    assert Container().warm_policy().min_interval_seconds <= min(windows)
+    interval = Container().warm_policy().min_interval_seconds
+    assert interval < min(windows), (
+        f"a warm every {interval}s against a {min(windows)}s window is a tie, and a tie is decided by "
+        "whichever side of the second the request lands on"
+    )
+
+
+def test_the_warm_budget_can_be_read_without_spending_it() -> None:
+    """`/api/health` answers with this: how many warms are left and when the next one is allowed."""
+    clock = FakeClock()
+    jobs: list = []
+    warmer = EngineWarmer(
+        engines={"glm": FakeWarmEngine(GLM), "fast": FakeEngine(FAST)},
+        registry=registry(),
+        clock=clock,
+        policy=WarmPolicy(min_interval_seconds=90, daily_cap=2),
+        submit=jobs.append,
+    )
+
+    before = warmer.report()
+    assert before["glm"] == {
+        "used_today": 0, "daily_cap": 2, "interval_seconds": 90, "next_warm_in": 90,
+    }
+    assert jobs == [], "reading the budget must not start a warm"
+
+    assert warmer.request("glm") == WarmStatus.STARTED
+    clock.now += 30
+    assert warmer.report()["glm"]["used_today"] == 1
+    assert warmer.report()["glm"]["next_warm_in"] == 60
+
+    assert warmer.request("glm") == WarmStatus.THROTTLED, "30 s is inside the 90 s window"
+    clock.now += 61
+    assert warmer.request("glm") == WarmStatus.STARTED, "past the window, and the cap allows two"
+    assert warmer.request("glm") == WarmStatus.CAPPED
 
 
 def test_only_the_remote_engine_can_be_warmed() -> None:

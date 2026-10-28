@@ -387,6 +387,20 @@ def test_the_intent_ping_starts_the_gpu(api):
     assert len(jobs) == 1
 
 
+def test_health_says_what_the_warm_budget_is(api):
+    """The question "is the warm path working" is one request, not an investigation."""
+    base, _ = api(glm_base_url="http://127.0.0.1:9/v1")
+    _, _, body = call(base, "/api/health")
+
+    health = json.loads(body)
+    budget = health["warm"]
+    assert budget["enabled"] is True
+    assert budget["engines"]["glm"] == {
+        "used_today": 0, "daily_cap": 40, "interval_seconds": 90, "next_warm_in": 90,
+    }
+    assert "fast" not in budget["engines"], "a native parser has no GPU to keep warm"
+
+
 def test_a_warm_names_the_engine_it_started(api, capfd):
     """A warm rents GPU time from boot to scale-down, so the log has to say which engine it was for:
     "why did mineru start when I had unticked it" should not need the dashboard to answer."""

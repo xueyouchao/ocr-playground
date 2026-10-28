@@ -43,14 +43,17 @@ class WarmStatus(StrEnum):
 class WarmPolicy:
     """What one engine may spend on being warm.
 
-    `min_interval_seconds` has to fit inside `scaledown_window` (120 s in `deploy/modal/serve_*.py`).
-    An engine that may only be woken after its container has already scaled down is cold and
-    un-warmable at the same time — the cold window this whole path exists to remove. `timeout_seconds`
-    has to outlast the boot it waits for (2-3 minutes), or a successful warm is reported as a failure.
+    `min_interval_seconds` has to sit *strictly* inside `scaledown_window` (120 s in
+    `deploy/modal/serve_*.py`). Equal is a tie, and a tie is decided by whichever side of the second
+    the request lands on: the container is allowed to die at the same instant the next warm is
+    allowed, so the warm path becomes a coin flip. An engine that may only be woken after it scaled
+    down is cold and un-warmable at the same time — the cold window this whole path exists to remove.
+    `timeout_seconds` has to outlast the boot it waits for (2-3 minutes), or a successful warm is
+    reported as a failure.
     """
 
     enabled: bool = True
-    min_interval_seconds: float = 120
+    min_interval_seconds: float = 90
     daily_cap: int = 40
     timeout_seconds: float = 300
 
@@ -121,6 +124,33 @@ class EngineWarmer:
 
         self._submit(lambda: self._warm(engine))  # outside the lock: it starts a thread
         return WarmStatus.STARTED
+
+    def report(self) -> dict[str, dict[str, object]]:
+        """What each engine's warm budget looks like, without starting anything.
+
+        `/api/health` answers with this, so "is the warm path working" is one request rather than an
+        investigation of containers, scale-down windows and a capped counter nobody can see.
+        """
+        with self._lock:
+            now = self._clock.monotonic()
+            report: dict[str, dict[str, object]] = {}
+            for mode in self._registry.modes:
+                if not isinstance(self._engines.get(mode), PreWarmable):
+                    continue  # a native parser has no GPU to keep warm
+                starts = self._starts.setdefault(mode, deque())
+                while starts and now - starts[0] >= ONE_DAY:
+                    starts.popleft()
+                last = self._last_started.get(mode)
+                wait = self._policy.min_interval_seconds if last is None else max(
+                    0.0, self._policy.min_interval_seconds - (now - last)
+                )
+                report[mode] = {
+                    "used_today": len(starts),
+                    "daily_cap": self._policy.daily_cap,
+                    "interval_seconds": self._policy.min_interval_seconds,
+                    "next_warm_in": round(wait, 1),
+                }
+            return report
 
     def _warm(self, engine: PreWarmable) -> None:
         try:

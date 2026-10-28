@@ -1145,7 +1145,7 @@ async function loadModes() {
 // a box being ticked, or a pointer or keyboard landing on the uploader — never on page load alone,
 // and never for the CPU path. Every cold parser that was ticked is pinged; the server throttles them
 // to one boot per interval and caps the day, so the extras wait for their turn.
-const WARM_COOLDOWN_MS = 60000;
+const WARM_COOLDOWN_MS = 90000;  // match the service: one warm per engine per 90 s
 const warmedAt = {};
 
 function warmGpu() {
