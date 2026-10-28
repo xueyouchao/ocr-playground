@@ -1160,10 +1160,17 @@ function warmGpu() {
   }
 }
 
-// Reaching for the uploader is intent, so it warms at once; a tick in the picker is not — the visitor
-// may be about to untick it, and a warm cannot be called back (it rents a GPU from boot to scale-down).
-$("uploader").addEventListener("pointerenter", warmGpu);
-$("uploader").addEventListener("focusin", warmGpu);
+// Reaching for the uploader is intent, so it warms at once; moving around the picker is not — the
+// visitor may be about to untick what they just ticked, and a warm cannot be called back (it rents a
+// GPU from boot to scale-down). So the picker is excluded here and warms only through its own `change`
+// handler below, after the selection settles. `pointerover` rather than `pointerenter`: it bubbles, so
+// the target says which control the pointer is actually on.
+function warmOnReach(event) {
+  if (!event.target.closest || event.target.closest("#mode-checks")) return;
+  warmGpu();
+}
+$("uploader").addEventListener("pointerover", warmOnReach);
+$("uploader").addEventListener("focusin", warmOnReach);
 
 const WARM_SETTLE_MS = 800;
 let warmTimer = null;

@@ -118,16 +118,36 @@ class EngineWarmer:
             starts = self._starts.setdefault(mode, deque())
             while starts and now - starts[0] >= ONE_DAY:
                 starts.popleft()
-            if len(starts) >= self._policy.daily_cap:
-                return WarmStatus.CAPPED
-            last = self._last_started.get(mode)
-            if last is not None and now - last < self._policy.min_interval_seconds:
-                return WarmStatus.THROTTLED
+            blocked, _ = self._wait(now, starts, self._last_started.get(mode))
+            if blocked is not None:
+                return blocked
             self._last_started[mode] = now
             starts.append(now)
 
         self._submit(lambda: self._warm(engine))  # outside the lock: it starts a thread
         return WarmStatus.STARTED
+
+    def _wait(
+        self, now: float, starts: deque[float], last: float | None
+    ) -> tuple[WarmStatus | None, float]:
+        """What a warm would get right now, and how long until that changes.
+
+        `report()` and `request()` both read the limits through here, so the budget the page sees can
+        never disagree with the decision the server makes — the first version of the report counted
+        down an interval that did not apply yet, and showed zero while the daily cap still blocked.
+        """
+        interval = self._policy.min_interval_seconds
+        interval_wait = 0.0 if last is None else max(0.0, interval - (now - last))
+        cap_wait = (
+            0.0
+            if len(starts) < self._policy.daily_cap
+            else max(0.0, ONE_DAY - (now - starts[0]))  # until the oldest start leaves the day
+        )
+        if cap_wait > interval_wait:
+            return WarmStatus.CAPPED, cap_wait
+        if interval_wait > 0:
+            return WarmStatus.THROTTLED, interval_wait
+        return None, 0.0
 
     def report(self) -> dict[str, dict[str, object]]:
         """What each engine's warm budget looks like, without starting anything.
@@ -144,15 +164,14 @@ class EngineWarmer:
                 starts = self._starts.setdefault(mode, deque())
                 while starts and now - starts[0] >= ONE_DAY:
                     starts.popleft()
-                last = self._last_started.get(mode)
-                wait = self._policy.min_interval_seconds if last is None else max(
-                    0.0, self._policy.min_interval_seconds - (now - last)
-                )
+                blocked, wait = self._wait(now, starts, self._last_started.get(mode))
                 report[mode] = {
                     "used_today": len(starts),
                     "daily_cap": self._policy.daily_cap,
                     "interval_seconds": self._policy.min_interval_seconds,
                     "next_warm_in": round(wait, 1),
+                    # what a request would answer right now: "started" means nothing is in the way
+                    "next_warm": blocked.value if blocked is not None else WarmStatus.STARTED.value,
                 }
             return report
 
