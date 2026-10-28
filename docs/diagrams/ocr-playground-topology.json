@@ -1,0 +1,574 @@
+{
+  "schema_version": 1,
+  "mode": "architecture",
+  "template_type": "architecture",
+  "style": 1,
+  "quality_profile": "showcase",
+  "composition": {
+    "profile": "showcase",
+    "max_total_bends": 30
+  },
+  "text_policy": "strict",
+  "width": 1560,
+  "height": 1170,
+  "title": "ocr-playground — runtime and deploy topology",
+  "subtitle": "six scanned pages, eight parsers: how a live request reaches them, how the page was built offline, and how a corpus is indexed incrementally",
+  "containers": [
+    {
+      "id": "host",
+      "x": 250,
+      "y": 130,
+      "width": 660,
+      "height": 510,
+      "label": "Host · srv1567269.hstgr.cloud",
+      "subtitle": "Docker · the reverse proxy terminates TLS · one static container, one API container"
+    },
+    {
+      "id": "cloud",
+      "x": 1020,
+      "y": 130,
+      "width": 500,
+      "height": 580,
+      "label": "Modal · one L4 per app, scaledown 120 s",
+      "subtitle": "5 /v1 endpoints + 3 modal-run batch apps · cold start ~3 min"
+    },
+    {
+      "id": "build",
+      "x": 250,
+      "y": 690,
+      "width": 765,
+      "height": 320,
+      "label": "Build · offline, stdlib only",
+      "subtitle": "records → evidence.json → index.html: no CocoIndex, no container"
+    },
+    {
+      "id": "index",
+      "x": 1020,
+      "y": 750,
+      "width": 500,
+      "height": 320,
+      "label": "Index · CocoIndex, incremental",
+      "subtitle": "CLI cocoindex update only · no daemon · same use case, same engines"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "browser",
+      "kind": "rect",
+      "x": 40,
+      "y": 200,
+      "width": 170,
+      "height": 80,
+      "label": "Browser",
+      "sublabel": "index.html + find bars",
+      "fill": "#f8fafc",
+      "stroke": "#94a3b8",
+      "title_size": 16,
+      "flat": true
+    },
+    {
+      "id": "proxy",
+      "kind": "rect",
+      "x": 270,
+      "y": 200,
+      "width": 620,
+      "height": 80,
+      "label": "Reverse proxy · TLS edge",
+      "sublabel": "Let's Encrypt (HTTP-01) · Host(…) + PathPrefix(/api) picks the container",
+      "fill": "#eff6ff",
+      "stroke": "#2563eb",
+      "title_size": 16,
+      "flat": true
+    },
+    {
+      "id": "nginx",
+      "kind": "rect",
+      "x": 270,
+      "y": 350,
+      "width": 280,
+      "height": 110,
+      "label": "nginx · static site",
+      "sublabel": "index.html + assets/pages, ro mount",
+      "fill": "#f0fdfa",
+      "stroke": "#0d9488",
+      "title_size": 16,
+      "flat": true
+    },
+    {
+      "id": "api",
+      "kind": "double_rect",
+      "x": 590,
+      "y": 350,
+      "width": 300,
+      "height": 110,
+      "label": "Upload API · :8090",
+      "sublabel": "interfaces/http · 2 parses at a time",
+      "fill": "#eff6ff",
+      "stroke": "#2563eb",
+      "title_size": 16,
+      "flat": true,
+      "tags": [
+        {
+          "label": "20 MB"
+        },
+        {
+          "label": "5 pages"
+        }
+      ]
+    },
+    {
+      "id": "fast",
+      "kind": "rect",
+      "x": 590,
+      "y": 510,
+      "width": 300,
+      "height": 90,
+      "label": "LiteParse + Tesseract",
+      "sublabel": "in container · CPU ×4 · a few seconds",
+      "fill": "#fff7ed",
+      "stroke": "#f97316",
+      "title_size": 15,
+      "flat": true
+    },
+    {
+      "id": "pdf",
+      "kind": "rect",
+      "x": 270,
+      "y": 760,
+      "width": 200,
+      "height": 90,
+      "label": "corpus/document.pdf",
+      "sublabel": "6 pages · 200 dpi",
+      "fill": "#f8fafc",
+      "stroke": "#94a3b8",
+      "title_size": 15,
+      "flat": true
+    },
+    {
+      "id": "prepare",
+      "kind": "rect",
+      "x": 514,
+      "y": 760,
+      "width": 200,
+      "height": 90,
+      "label": "prepare.py",
+      "sublabel": "pdftoppm + ImageMagick",
+      "fill": "#ffffff",
+      "stroke": "#cbd5e1",
+      "title_size": 15,
+      "flat": true
+    },
+    {
+      "id": "runners",
+      "kind": "rect",
+      "x": 758,
+      "y": 760,
+      "width": 200,
+      "height": 90,
+      "label": "runners/ + modal batch",
+      "sublabel": "8 systems · raw output",
+      "fill": "#ffffff",
+      "stroke": "#cbd5e1",
+      "title_size": 15,
+      "flat": true
+    },
+    {
+      "id": "records",
+      "kind": "rect",
+      "x": 758,
+      "y": 890,
+      "width": 200,
+      "height": 90,
+      "label": "records/*.json",
+      "sublabel": "verbatim, one per system",
+      "fill": "#f8fafc",
+      "stroke": "#94a3b8",
+      "title_size": 15,
+      "flat": true
+    },
+    {
+      "id": "collect",
+      "kind": "rect",
+      "x": 514,
+      "y": 890,
+      "width": 200,
+      "height": 90,
+      "label": "collect.py → build.py",
+      "sublabel": "evidence.json → index.html",
+      "fill": "#ffffff",
+      "stroke": "#cbd5e1",
+      "title_size": 15,
+      "flat": true
+    },
+    {
+      "id": "site",
+      "kind": "rect",
+      "x": 270,
+      "y": 890,
+      "width": 200,
+      "height": 90,
+      "label": "index.html + pages",
+      "sublabel": "what make publish copies",
+      "fill": "#f8fafc",
+      "stroke": "#94a3b8",
+      "title_size": 15,
+      "flat": true
+    },
+    {
+      "id": "corpus",
+      "kind": "rect",
+      "x": 1040,
+      "y": 820,
+      "width": 210,
+      "height": 80,
+      "label": "OCR_CORPUS",
+      "sublabel": "PDFs and page images",
+      "fill": "#f8fafc",
+      "stroke": "#94a3b8",
+      "title_size": 15,
+      "flat": true
+    },
+    {
+      "id": "indexer",
+      "kind": "rect",
+      "x": 1290,
+      "y": 820,
+      "width": 210,
+      "height": 80,
+      "label": "main.py · CocoIndex",
+      "sublabel": "cocoindex update",
+      "fill": "#ffffff",
+      "stroke": "#cbd5e1",
+      "title_size": 15,
+      "flat": true
+    },
+    {
+      "id": "out",
+      "kind": "rect",
+      "x": 1040,
+      "y": 950,
+      "width": 460,
+      "height": 80,
+      "label": "out/ · documents, pages.jsonl, summary",
+      "sublabel": "cocoindex.db memo: digest + mode + engine",
+      "fill": "#f8fafc",
+      "stroke": "#94a3b8",
+      "title_size": 15,
+      "flat": true
+    },
+    {
+      "id": "glm",
+      "kind": "rect",
+      "x": 1040,
+      "y": 180,
+      "width": 200,
+      "height": 68,
+      "label": "GLM-OCR · /v1",
+      "sublabel": "0.9B VLM · vLLM · warm",
+      "fill": "#faf5ff",
+      "stroke": "#7c3aed",
+      "title_size": 15,
+      "flat": true
+    },
+    {
+      "id": "chandra",
+      "kind": "rect",
+      "x": 1040,
+      "y": 288,
+      "width": 200,
+      "height": 68,
+      "label": "Chandra OCR 2 · /v1",
+      "sublabel": "datalab VLM · markdown",
+      "fill": "#faf5ff",
+      "stroke": "#7c3aed",
+      "title_size": 15,
+      "flat": true
+    },
+    {
+      "id": "nemotron",
+      "kind": "rect",
+      "x": 1040,
+      "y": 396,
+      "width": 200,
+      "height": 68,
+      "label": "Nemotron 3.5 · /v1",
+      "sublabel": "NVIDIA VLM · own post",
+      "fill": "#faf5ff",
+      "stroke": "#7c3aed",
+      "title_size": 15,
+      "flat": true
+    },
+    {
+      "id": "unlimited",
+      "kind": "rect",
+      "x": 1040,
+      "y": 504,
+      "width": 200,
+      "height": 68,
+      "label": "Unlimited-OCR · /v1",
+      "sublabel": "tiled 640 px · long pages",
+      "fill": "#faf5ff",
+      "stroke": "#7c3aed",
+      "title_size": 15,
+      "flat": true
+    },
+    {
+      "id": "mineru",
+      "kind": "rect",
+      "x": 1040,
+      "y": 612,
+      "width": 200,
+      "height": 68,
+      "label": "MinerU · /v1",
+      "sublabel": "vlm → pipeline fallback",
+      "fill": "#faf5ff",
+      "stroke": "#7c3aed",
+      "title_size": 15,
+      "flat": true
+    },
+    {
+      "id": "paddle_gpu",
+      "kind": "rect",
+      "x": 1290,
+      "y": 180,
+      "width": 200,
+      "height": 140,
+      "label": "PP-StructureV3",
+      "sublabel": "server models on L4",
+      "fill": "#f5f3ff",
+      "stroke": "#a78bfa",
+      "title_size": 15,
+      "flat": true,
+      "tags": [
+        {
+          "label": "modal run"
+        }
+      ]
+    },
+    {
+      "id": "mineru_gpu",
+      "kind": "rect",
+      "x": 1290,
+      "y": 360,
+      "width": 200,
+      "height": 140,
+      "label": "MinerU 2.5",
+      "sublabel": "page by page, retries",
+      "fill": "#f5f3ff",
+      "stroke": "#a78bfa",
+      "title_size": 15,
+      "flat": true,
+      "tags": [
+        {
+          "label": "modal run"
+        }
+      ]
+    },
+    {
+      "id": "chandra_pages",
+      "kind": "rect",
+      "x": 1290,
+      "y": 540,
+      "width": 200,
+      "height": 140,
+      "label": "Chandra pages",
+      "sublabel": "dense handwriting, no proxy",
+      "fill": "#f5f3ff",
+      "stroke": "#a78bfa",
+      "title_size": 15,
+      "flat": true,
+      "tags": [
+        {
+          "label": "modal run"
+        }
+      ]
+    }
+  ],
+  "arrows": [
+    {
+      "id": "parse-1-glm",
+      "source": "api",
+      "target": "glm",
+      "source_port": "right",
+      "target_port": "left",
+      "flow": "data",
+      "corridor_x": [
+        930
+      ]
+    },
+    {
+      "id": "parse-2-chandra",
+      "source": "api",
+      "target": "chandra",
+      "source_port": "right",
+      "target_port": "left",
+      "flow": "data",
+      "corridor_x": [
+        950
+      ]
+    },
+    {
+      "id": "parse-3-nemotron",
+      "source": "api",
+      "target": "nemotron",
+      "source_port": "right",
+      "target_port": "left",
+      "flow": "data",
+      "corridor_x": [
+        1010
+      ]
+    },
+    {
+      "id": "parse-4-unlimited",
+      "source": "api",
+      "target": "unlimited",
+      "source_port": "right",
+      "target_port": "left",
+      "flow": "data",
+      "corridor_x": [
+        990
+      ]
+    },
+    {
+      "id": "parse-5-mineru",
+      "source": "api",
+      "target": "mineru",
+      "source_port": "right",
+      "target_port": "left",
+      "flow": "data",
+      "corridor_x": [
+        970
+      ]
+    },
+    {
+      "id": "req",
+      "source": "browser",
+      "target": "proxy",
+      "source_port": "right",
+      "target_port": "left",
+      "flow": "control"
+    },
+    {
+      "id": "get-site",
+      "source": "proxy",
+      "target": "nginx",
+      "source_port": "bottom",
+      "target_port": "top",
+      "flow": "control",
+      "label": "GET /",
+      "corridor_y": [
+        300
+      ]
+    },
+    {
+      "id": "post-api",
+      "source": "proxy",
+      "target": "api",
+      "source_port": "bottom",
+      "target_port": "top",
+      "flow": "control",
+      "label": "/api/parse",
+      "corridor_y": [
+        300
+      ]
+    },
+    {
+      "id": "fast-path",
+      "source": "api",
+      "target": "fast",
+      "source_port": "bottom",
+      "target_port": "top",
+      "flow": "data",
+      "label": "fast"
+    },
+    {
+      "id": "raster",
+      "source": "pdf",
+      "target": "prepare",
+      "source_port": "right",
+      "target_port": "left",
+      "flow": "write"
+    },
+    {
+      "id": "read-pages",
+      "source": "prepare",
+      "target": "runners",
+      "source_port": "right",
+      "target_port": "left",
+      "flow": "write"
+    },
+    {
+      "id": "raw-out",
+      "source": "runners",
+      "target": "records",
+      "source_port": "bottom",
+      "target_port": "top",
+      "flow": "write"
+    },
+    {
+      "id": "collect-run",
+      "source": "records",
+      "target": "collect",
+      "source_port": "left",
+      "target_port": "right",
+      "flow": "write"
+    },
+    {
+      "id": "build-run",
+      "source": "collect",
+      "target": "site",
+      "source_port": "left",
+      "target_port": "right",
+      "flow": "write"
+    },
+    {
+      "id": "publish",
+      "source": "site",
+      "target": "nginx",
+      "source_port": "left",
+      "target_port": "left",
+      "flow": "write",
+      "label": "make publish · rsync",
+      "corridor_x": [
+        230
+      ]
+    },
+    {
+      "id": "scan",
+      "source": "corpus",
+      "target": "indexer",
+      "source_port": "right",
+      "target_port": "left",
+      "flow": "data"
+    },
+    {
+      "id": "declare",
+      "source": "indexer",
+      "target": "out",
+      "source_port": "bottom",
+      "target_port": "top",
+      "flow": "write"
+    }
+  ],
+  "legend_orientation": "horizontal",
+  "legend_x": 60,
+  "legend_y": 1050,
+  "legend_locked": true,
+  "legend": [
+    {
+      "flow": "control",
+      "label": "HTTP request"
+    },
+    {
+      "flow": "data",
+      "label": "parse call"
+    },
+    {
+      "flow": "write",
+      "label": "build · publish"
+    }
+  ],
+  "footer": "Style 1 · Flat Icon · sources: README, docs/architecture.md, deploy/README.md, modal/*.py, interfaces/indexer/",
+  "footer_x": 60,
+  "footer_y": 1120
+}
